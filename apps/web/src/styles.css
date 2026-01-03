@@ -1,0 +1,150 @@
+:root {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.4;
+
+  --mocha-rosewater: #f5e0dc;
+  --mocha-flamingo: #f2cdcd;
+  --mocha-pink: #f5c2e7;
+  --mocha-mauve: #cba6f7;
+  --mocha-red: #f38ba8;
+  --mocha-peach: #fab387;
+  --mocha-yellow: #f9e2af;
+  --mocha-green: #a6e3a1;
+  --mocha-sapphire: #74c7ec;
+  --mocha-blue: #89b4fa;
+
+  --mocha-text: #cdd6f4;
+  --mocha-subtext0: #a6adc8;
+  --mocha-overlay0: #6c7086;
+
+  --mocha-surface2: #585b70;
+  --mocha-surface1: #45475a;
+  --mocha-surface0: #313244;
+  --mocha-base: #1e1e2e;
+  --mocha-mantle: #181825;
+  --mocha-crust: #11111b;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(203, 166, 247, 0.18), transparent 60%),
+    radial-gradient(900px 520px at 100% 0%, rgba(116, 199, 236, 0.14), transparent 55%),
+    var(--mocha-base);
+  color: var(--mocha-text);
+  overflow-x: hidden;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+}
+
+.ant-layout {
+  background: transparent;
+}
+
+.ant-card {
+  border-radius: 12px;
+}
+
+.ant-card .ant-card-head {
+  border-bottom: 1px solid rgba(88, 91, 112, 0.65);
+}
+
+.ant-table {
+  background: transparent;
+}
+
+.dd-link-btn {
+  padding: 0;
+}
+
+.dd-template-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dd-template-open {
+  flex: 1;
+  min-width: 0;
+}
+
+.dd-template-cell .dd-copy-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  margin-top: 2px;
+}
+
+.dd-template-cell:hover .dd-copy-btn,
+.dd-template-cell .dd-copy-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dd-code-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.dd-sql-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.dd-sql-block {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(69, 71, 90, 0.5);
+  border: 1px solid rgba(88, 91, 112, 0.65);
+  color: var(--mocha-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.dd-sql-block code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  color: inherit;
+}
+
+.dd-filters .ant-form-item {
+  margin-bottom: 8px;
+}
+
+.dd-filters .ant-form-item-label {
+  padding: 0 0 2px;
+}
+
+.dd-summary .ant-statistic-title {
+  margin-bottom: 0;
+}
+
+.dd-summary .ant-statistic-content-value {
+  font-size: 18px;
+}
+
+.dd-summary-range {
+  display: block;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -1,0 +1,390 @@
+import { ReloadOutlined } from "@ant-design/icons";
+import {
+  Button,
+  Card,
+  Col,
+  Drawer,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tabs,
+  Typography,
+} from "antd";
+import type { ColumnsType } from "antd/es/table";
+import dayjs from "dayjs";
+import { useMemo, useState } from "react";
+import type { DbClient } from "../db/client/dbClient";
+import type {
+  DimensionRankBy,
+  DimensionTopRow,
+  QueryFilters,
+  QuerySampleRow,
+  TemplateSeriesResult,
+} from "../db/client/protocol";
+import { formatBytes, formatDurationMs, formatNumber, formatSqlLabel } from "../utils/format";
+import { useAsyncData } from "../utils/useAsync";
+import AsyncContent from "./AsyncContent";
+import CopyIconButton from "./CopyIconButton";
+import EChart from "./EChart";
+
+const { Text } = Typography;
+
+export interface TemplateRef {
+  templateHash: string;
+  template: string;
+  tableGuess?: string | null;
+  execCount?: number;
+  totalCpuMs?: number;
+  totalTimeMs?: number;
+  p95TimeMs?: number | null;
+  maxTimeMs?: number;
+}
+
+export interface TemplateDetailDrawerProps {
+  open: boolean;
+  onClose: () => void;
+  client: DbClient;
+  datasetId: string | null;
+  template: TemplateRef | null;
+  filters: QueryFilters;
+}
+
+type SeriesMetric = "execCount" | "totalCpuMs" | "totalTimeMs";
+type DimsData = { users: DimensionTopRow[]; dbs: DimensionTopRow[]; ips: DimensionTopRow[] };
+
+function sumNumbers(values: number[] | null | undefined): number {
+  return values?.reduce((sum, v) => sum + v, 0) ?? 0;
+}
+
+const renderNullableText = (v: string | null) => v ?? "-";
+
+const SAMPLE_COLUMNS: ColumnsType<QuerySampleRow> = [
+  {
+    title: "Time",
+    dataIndex: "eventTimeMs",
+    width: 140,
+    render: (v: number | null) => (v == null ? "-" : dayjs(v).format("MM-DD HH:mm:ss")),
+  },
+  {
+    title: "Query Time",
+    dataIndex: "queryTimeMs",
+    width: 110,
+    sorter: (a, b) => (a.queryTimeMs ?? 0) - (b.queryTimeMs ?? 0),
+    render: formatDurationMs,
+  },
+  {
+    title: "CPU",
+    dataIndex: "cpuTimeMs",
+    width: 90,
+    sorter: (a, b) => (a.cpuTimeMs ?? 0) - (b.cpuTimeMs ?? 0),
+    render: formatDurationMs,
+  },
+  {
+    title: "Scan",
+    dataIndex: "scanBytes",
+    width: 110,
+    render: formatBytes,
+  },
+  { title: "User", dataIndex: "userName", width: 120, render: renderNullableText },
+  { title: "DB", dataIndex: "dbName", width: 120, render: renderNullableText },
+  { title: "Client", dataIndex: "clientIp", width: 120, render: renderNullableText },
+  { title: "State", dataIndex: "state", width: 90, render: renderNullableText },
+  {
+    title: "SQL",
+    dataIndex: "stmtRaw",
+    render: (v: string | null) => (v ? <Text code>{formatSqlLabel(v, 120)}</Text> : "-"),
+  },
+];
+
+const DIM_COLUMNS: ColumnsType<DimensionTopRow> = [
+  {
+    title: "Name",
+    dataIndex: "name",
+    render: (v: string) => <Text code>{v}</Text>,
+  },
+  { title: "Count", dataIndex: "execCount", width: 90, render: (v: number) => formatNumber(v) },
+  { title: "Total CPU", dataIndex: "totalCpuMs", width: 110, render: formatDurationMs },
+  { title: "Total Time", dataIndex: "totalTimeMs", width: 110, render: formatDurationMs },
+];
+
+export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): JSX.Element {
+  const { open, onClose, client, datasetId, template, filters } = props;
+
+  const [bucketSeconds, setBucketSeconds] = useState(300);
+  const [seriesMetric, setSeriesMetric] = useState<SeriesMetric>("totalCpuMs");
+
+  const [dimRankBy, setDimRankBy] = useState<DimensionRankBy>("totalCpuMs");
+  const enabled = open && !!datasetId && !!template;
+
+  const seriesQuery = useAsyncData<TemplateSeriesResult | null>(
+    enabled,
+    () => client.queryTemplateSeries(datasetId!, template!.templateHash, bucketSeconds, filters),
+    [bucketSeconds, client, datasetId, filters, template],
+    null
+  );
+
+  const samplesQuery = useAsyncData<QuerySampleRow[]>(
+    enabled,
+    () => client.querySamples(datasetId!, template!.templateHash, 50, "queryTimeMs", filters),
+    [client, datasetId, filters, template],
+    []
+  );
+
+  const dimsQuery = useAsyncData<DimsData>(
+    enabled,
+    () => {
+      const id = datasetId!;
+      const templateHash = template!.templateHash;
+      return Promise.all([
+        client.queryDimensionTop(id, templateHash, "userName", 10, dimRankBy, filters),
+        client.queryDimensionTop(id, templateHash, "dbName", 10, dimRankBy, filters),
+        client.queryDimensionTop(id, templateHash, "clientIp", 10, dimRankBy, filters),
+      ]).then(([users, dbs, ips]) => ({ users, dbs, ips }));
+    },
+    [client, datasetId, dimRankBy, filters, template],
+    { users: [], dbs: [], ips: [] }
+  );
+
+  const reloadAll = () => [seriesQuery, samplesQuery, dimsQuery].forEach((q) => q.reload());
+
+  const { data: series, loading: seriesLoading, error: seriesError } = seriesQuery;
+  const { data: samples, loading: samplesLoading, error: samplesError } = samplesQuery;
+  const { data: dimsData, loading: dimsLoading, error: dimsError } = dimsQuery;
+  const { users: topUsers, dbs: topDbs, ips: topIps } = dimsData;
+
+  const computedTotals = useMemo(() => {
+    return {
+      execCount: series ? sumNumbers(series.execCounts) : undefined,
+      totalCpuMs: series ? sumNumbers(series.totalCpuMs) : undefined,
+      totalTimeMs: series ? sumNumbers(series.totalTimeMs) : undefined,
+    };
+  }, [series]);
+
+  const seriesOption = useMemo(() => {
+    if (!series || series.bucketStarts.length === 0) return null;
+    const xLabels = series.bucketStarts.map((t) => dayjs(t).format("MM-DD HH:mm"));
+    const values =
+      seriesMetric === "execCount"
+        ? series.execCounts
+        : seriesMetric === "totalTimeMs"
+          ? series.totalTimeMs
+          : series.totalCpuMs;
+
+    const interval = xLabels.length <= 16 ? 0 : Math.max(0, Math.ceil(xLabels.length / 12) - 1);
+    const yFormatter = (v: number) => {
+      if (seriesMetric === "execCount") return formatNumber(Math.round(v));
+      return formatDurationMs(Math.round(v));
+    };
+
+    return {
+      tooltip: {
+        trigger: "axis",
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          const i = Number(p?.dataIndex ?? -1);
+          const bucket = series.bucketStarts[i];
+          const v = Number(p?.data ?? 0);
+          return `bucket: ${bucket}<br/>value: ${yFormatter(v)}`;
+        },
+      },
+      grid: { left: 60, right: 20, top: 20, bottom: 60 },
+      xAxis: { type: "category", data: xLabels, axisLabel: { interval, rotate: 45 } },
+      yAxis: { type: "value", axisLabel: { formatter: (v: number) => yFormatter(Number(v)) } },
+      series: [
+        {
+          type: "line",
+          data: values,
+          smooth: true,
+          showSymbol: false,
+          areaStyle: { opacity: 0.18 },
+        },
+      ],
+    };
+  }, [series, seriesMetric]);
+
+  const drawerTitle = template
+    ? `Template Detail · ${formatSqlLabel(template.template, 64)}`
+    : "Template Detail";
+
+  return (
+    <Drawer title={drawerTitle} width={920} onClose={onClose} open={open}>
+      {!template ? (
+        <Text type="secondary">No selection</Text>
+      ) : (
+        <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <Row gutter={12}>
+            {[
+              {
+                title: "Total CPU",
+                value: formatDurationMs(template.totalCpuMs ?? computedTotals.totalCpuMs),
+              },
+              {
+                title: "Total Time",
+                value: formatDurationMs(template.totalTimeMs ?? computedTotals.totalTimeMs),
+              },
+              {
+                title: "Count",
+                value: formatNumber(template.execCount ?? computedTotals.execCount ?? 0),
+              },
+              { title: "P95 Time", value: formatDurationMs(template.p95TimeMs ?? null) },
+            ].map((s) => (
+              <Col key={s.title} xs={24} sm={12} md={6}>
+                <Statistic title={s.title} value={s.value} />
+              </Col>
+            ))}
+          </Row>
+
+          <Card
+            size="small"
+            title="Template"
+            extra={
+              <Space size={6}>
+                <Text type="secondary">
+                  hash: <Text code>{template.templateHash}</Text>
+                </Text>
+                <CopyIconButton text={template.template} tooltip="Copy SQL" ariaLabel="Copy SQL" />
+              </Space>
+            }
+          >
+            <pre className="dd-sql-block">
+              <code>{template.template}</code>
+            </pre>
+            {template.tableGuess && (
+              <>
+                <div style={{ height: 12 }} />
+                <Text type="secondary">
+                  table_guess: <Text code>{template.tableGuess}</Text>
+                </Text>
+              </>
+            )}
+          </Card>
+
+          <Tabs
+            items={[
+              {
+                key: "trend",
+                label: "Trend",
+                children: (
+                  <Card
+                    size="small"
+                    title="Time Series"
+                    extra={
+                      <Space>
+                        <Select
+                          value={seriesMetric}
+                          onChange={(v) => setSeriesMetric(v)}
+                          style={{ width: 160 }}
+                          options={[
+                            { value: "execCount", label: "metric: count" },
+                            { value: "totalCpuMs", label: "metric: total_cpu_ms" },
+                            { value: "totalTimeMs", label: "metric: total_time_ms" },
+                          ]}
+                        />
+                        <Select
+                          value={bucketSeconds}
+                          onChange={(v) => setBucketSeconds(v)}
+                          style={{ width: 140 }}
+                          options={[
+                            { value: 60, label: "bucket: 1m" },
+                            { value: 300, label: "bucket: 5m" },
+                            { value: 900, label: "bucket: 15m" },
+                            { value: 3600, label: "bucket: 1h" },
+                          ]}
+                        />
+                        <Button
+                          icon={<ReloadOutlined />}
+                          onClick={reloadAll}
+                          disabled={!datasetId || seriesLoading}
+                        >
+                          Refresh
+                        </Button>
+                      </Space>
+                    }
+                  >
+                    <AsyncContent
+                      loading={seriesLoading}
+                      error={seriesError}
+                      isEmpty={!seriesOption}
+                    >
+                      <EChart option={seriesOption as any} height={320} />
+                    </AsyncContent>
+                  </Card>
+                ),
+              },
+              {
+                key: "samples",
+                label: "Slow Samples",
+                children: (
+                  <Card size="small" title="Slowest Queries (Top 50 by query_time_ms)">
+                    <AsyncContent
+                      loading={samplesLoading}
+                      error={samplesError}
+                      isEmpty={samples.length === 0}
+                    >
+                      <Table<QuerySampleRow>
+                        rowKey={(r) => String(r.recordId)}
+                        size="small"
+                        pagination={{ pageSize: 10 }}
+                        columns={SAMPLE_COLUMNS}
+                        dataSource={samples}
+                        scroll={{ x: 980 }}
+                      />
+                    </AsyncContent>
+                  </Card>
+                ),
+              },
+              {
+                key: "dims",
+                label: "Dimensions",
+                children: (
+                  <Card
+                    size="small"
+                    title="Top Dimensions"
+                    extra={
+                      <Space>
+                        <Select
+                          value={dimRankBy}
+                          onChange={(v) => setDimRankBy(v)}
+                          style={{ width: 180 }}
+                          options={[
+                            { value: "totalCpuMs", label: "rank: total_cpu_ms" },
+                            { value: "totalTimeMs", label: "rank: total_time_ms" },
+                            { value: "execCount", label: "rank: count" },
+                          ]}
+                        />
+                      </Space>
+                    }
+                  >
+                    <AsyncContent loading={dimsLoading} error={dimsError} isEmpty={false}>
+                      <Tabs
+                        items={[
+                          { key: "users", title: "Users", rows: topUsers },
+                          { key: "dbs", title: "DBs", rows: topDbs },
+                          { key: "ips", title: "Client IPs", rows: topIps },
+                        ].map((d) => ({
+                          key: d.key,
+                          label: `${d.title} (${d.rows.length})`,
+                          children: (
+                            <Table<DimensionTopRow>
+                              rowKey={(r) => r.name}
+                              size="small"
+                              pagination={false}
+                              columns={DIM_COLUMNS}
+                              dataSource={d.rows}
+                            />
+                          ),
+                        }))}
+                      />
+                    </AsyncContent>
+                  </Card>
+                ),
+              },
+            ]}
+          />
+        </Space>
+      )}
+    </Drawer>
+  );
+}
