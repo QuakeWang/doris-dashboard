@@ -9,8 +9,30 @@ import { insertArrowViaStaging, queryWithParams } from "./sql";
 let abortController: AbortController | null = null;
 
 const MAX_STMT_RAW_CHARS = 4096;
-const BATCH_SIZE = 10000;
-const MAX_BATCH_BYTES = 16 * 1024 * 1024;
+const BATCH_SIZE = 5000;
+const MAX_BATCH_BYTES = 8 * 1024 * 1024;
+const LARGE_FILE_CHUNKED_TXN_THRESHOLD_BYTES = 256 * 1024 * 1024;
+const MIN_ARROW_INSERT_ROWS = 200;
+
+const estimateUtf16Bytes = (v: string | null | undefined): number =>
+  typeof v === "string" ? v.length * 2 : 0;
+
+const estimateRecordBytes = (
+  parsed: ReturnType<typeof parseAuditLogRecordBlock>,
+  stmtRaw: string | null
+): number => {
+  if (!parsed) return 0;
+  return (
+    estimateUtf16Bytes(stmtRaw) +
+    estimateUtf16Bytes(parsed.queryId) +
+    estimateUtf16Bytes(parsed.userName) +
+    estimateUtf16Bytes(parsed.clientIp) +
+    estimateUtf16Bytes(parsed.feIp) +
+    estimateUtf16Bytes(parsed.dbName) +
+    estimateUtf16Bytes(parsed.state) +
+    256
+  );
+};
 
 const RECORD_COLS =
   "dataset_id,record_id,event_time_ms,is_internal,query_id,user_name,client_ip,fe_ip,db_name,state,error_code,query_time_ms,cpu_time_ms,scan_bytes,scan_rows,return_rows,peak_memory_bytes,stmt_raw,stripped_template_id".split(
@@ -21,6 +43,7 @@ const RECORD_INSERT_SQL = `INSERT INTO audit_log_records (${RECORD_COLS.join(", 
 const STRIPPED_TPL_COLS = "dataset_id,stripped_template_id,sql_template_stripped,table_guess".split(
   ","
 ) as readonly string[];
+const STRIPPED_TPL_INSERT_SQL = `INSERT OR IGNORE INTO audit_sql_templates_stripped (${STRIPPED_TPL_COLS.join(", ")}) VALUES (${STRIPPED_TPL_COLS.map(() => "?").join(", ")})`;
 
 const pushRow = (arrays: unknown[][], values: unknown[]) =>
   values.forEach((v, i) => arrays[i].push(v));
@@ -69,6 +92,7 @@ export async function handleImportAuditLog(
     await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
 
   const insertStmt = await c.prepare(RECORD_INSERT_SQL);
+  const insertTplStmt = await c.prepare(STRIPPED_TPL_INSERT_SQL);
 
   const recordArrays = RECORD_COLS.map(() => [] as unknown[]);
   const strippedTplArrays = STRIPPED_TPL_COLS.map(() => [] as unknown[]);
@@ -85,6 +109,13 @@ export async function handleImportAuditLog(
 
   let batchBytes = 0;
 
+  const useSingleTransaction = bytesTotal <= LARGE_FILE_CHUNKED_TXN_THRESHOLD_BYTES;
+  if (!useSingleTransaction) {
+    log(
+      `Large file detected (${Math.round(bytesTotal / (1024 * 1024))} MiB), switching to chunked transactions to reduce wasm memory pressure.`
+    );
+  }
+
   let lastProgressEmitMs = 0;
   const maybeEmitProgress = (force = false) => {
     const now = performance.now();
@@ -100,43 +131,99 @@ export async function handleImportAuditLog(
     });
   };
 
-  const flush = async (): Promise<void> => {
-    const rowCount = recordArrays[0].length;
-    if (rowCount === 0) return;
+  const insertRecordRange = async (start: number, end: number): Promise<number> => {
+    const count = end - start;
+    if (count <= 0) return 0;
+
     try {
+      const arrays = recordArrays.map((a) => a.slice(start, end));
       await insertArrowViaStaging(
         c,
         "audit_log_records",
-        tableFromCols(RECORD_COLS, recordArrays),
+        tableFromCols(RECORD_COLS, arrays),
         "insert"
       );
-      recordsInserted += rowCount;
+      return count;
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       log(
-        `Arrow batch insert failed, fallback to row inserts: ${e instanceof Error ? e.message : String(e)}`
+        `Arrow insert failed for audit_log_records (rows=${count}), retry smaller chunks: ${message}`
       );
-      for (let r = 0; r < rowCount; r++) {
-        if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-        await insertStmt.query(...(recordArrays.map((a) => a[r]) as any[]));
-        recordsInserted++;
+      if (count <= MIN_ARROW_INSERT_ROWS) {
+        let inserted = 0;
+        for (let r = start; r < end; r++) {
+          if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+          await insertStmt.query(...(recordArrays.map((a) => a[r]) as any[]));
+          inserted++;
+        }
+        return inserted;
       }
+      const mid = start + Math.floor(count / 2);
+      const left = await insertRecordRange(start, mid);
+      const right = await insertRecordRange(mid, end);
+      return left + right;
     }
+  };
+
+  const flushRecords = async (): Promise<void> => {
+    const rowCount = recordArrays[0].length;
+    if (rowCount === 0) return;
+    const inserted = await insertRecordRange(0, rowCount);
+    recordsInserted += inserted;
     clearArrays(recordArrays);
     batchBytes = 0;
   };
 
+  const insertTemplateRange = async (start: number, end: number): Promise<void> => {
+    const count = end - start;
+    if (count <= 0) return;
+    try {
+      const arrays = strippedTplArrays.map((a) => a.slice(start, end));
+      await insertArrowViaStaging(
+        c,
+        "audit_sql_templates_stripped",
+        tableFromCols(STRIPPED_TPL_COLS, arrays),
+        "insertOrIgnore"
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      log(
+        `Arrow insert failed for audit_sql_templates_stripped (rows=${count}), retry smaller chunks: ${message}`
+      );
+      if (count <= MIN_ARROW_INSERT_ROWS) {
+        for (let r = start; r < end; r++) {
+          if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+          await insertTplStmt.query(...(strippedTplArrays.map((a) => a[r]) as any[]));
+        }
+        return;
+      }
+      const mid = start + Math.floor(count / 2);
+      await insertTemplateRange(start, mid);
+      await insertTemplateRange(mid, end);
+    }
+  };
+
   const flushTemplates = async (): Promise<void> => {
-    if (strippedTplArrays[0].length === 0) return;
-    await insertArrowViaStaging(
-      c,
-      "audit_sql_templates_stripped",
-      tableFromCols(STRIPPED_TPL_COLS, strippedTplArrays),
-      "insertOrIgnore"
-    );
+    const rowCount = strippedTplArrays[0].length;
+    if (rowCount === 0) return;
+    await insertTemplateRange(0, rowCount);
     clearArrays(strippedTplArrays);
   };
 
-  await c.query("BEGIN TRANSACTION");
+  const flushBatch = async (): Promise<void> => {
+    if (recordArrays[0].length === 0 && strippedTplArrays[0].length === 0) return;
+    if (!useSingleTransaction) await c.query("BEGIN TRANSACTION");
+    try {
+      await flushTemplates();
+      await flushRecords();
+      if (!useSingleTransaction) await c.query("COMMIT");
+    } catch (e) {
+      if (!useSingleTransaction) await c.query("ROLLBACK");
+      throw e;
+    }
+  };
+
+  if (useSingleTransaction) await c.query("BEGIN TRANSACTION");
   try {
     for await (const block of iterateRecordBlocks(file, {
       signal,
@@ -186,26 +273,38 @@ export async function handleImportAuditLog(
         strippedId,
       ]);
 
-      batchBytes +=
-        (typeof stmtRaw === "string" ? stmtRaw.length * 2 : 0) +
-        (parsed.queryId ? parsed.queryId.length * 2 : 0);
+      batchBytes += estimateRecordBytes(parsed, stmtRaw);
 
       if (recordArrays[0].length >= BATCH_SIZE || batchBytes >= MAX_BATCH_BYTES) {
-        await flushTemplates();
-        await flush();
+        await flushBatch();
         maybeEmitProgress(true);
       }
     }
-    await flushTemplates();
-    await flush();
+    await flushBatch();
 
-    await c.query("COMMIT");
+    if (useSingleTransaction) await c.query("COMMIT");
     await createAuditLogIndexes(c);
   } catch (e) {
-    await c.query("ROLLBACK");
+    if (useSingleTransaction) await c.query("ROLLBACK");
+    if (!useSingleTransaction) {
+      try {
+        log("Import failed, cleaning up partially committed data for this dataset.");
+        for (const table of ["audit_log_records", "audit_sql_templates_stripped"]) {
+          await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
+        }
+        await createAuditLogIndexes(c);
+      } catch (cleanupErr) {
+        log(
+          `Cleanup after failed import skipped: ${
+            cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+          }`
+        );
+      }
+    }
     throw e;
   } finally {
     await insertStmt.close();
+    await insertTplStmt.close();
     maybeEmitProgress(true);
   }
 

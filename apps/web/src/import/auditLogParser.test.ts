@@ -109,4 +109,13 @@ describe("parseAuditLogRecordBlock", () => {
     expect(r).not.toBeNull();
     expect(r!.isInternal).toBe(true);
   });
+
+  it("handles carriage returns inside Stmt", () => {
+    const line =
+      "2025-12-25 11:17:02,188 [query] |Db=d|QueryId=q|Stmt=select\r 1\r from t where a = 10 and b = 'x' and is_deleted = 0|";
+    const r = parseAuditLogRecordBlock(line);
+    expect(r).not.toBeNull();
+    expect(r!.stmtRaw).toContain("\r");
+    expect(r!.sqlTemplateStripped).toBe("select ? from t where a = ? and b = ?");
+  });
 });
