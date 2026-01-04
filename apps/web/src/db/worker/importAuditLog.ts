@@ -286,6 +286,21 @@ export async function handleImportAuditLog(
     await createAuditLogIndexes(c);
   } catch (e) {
     if (useSingleTransaction) await c.query("ROLLBACK");
+    if (!useSingleTransaction) {
+      try {
+        log("Import failed, cleaning up partially committed data for this dataset.");
+        for (const table of ["audit_log_records", "audit_sql_templates_stripped"]) {
+          await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
+        }
+        await createAuditLogIndexes(c);
+      } catch (cleanupErr) {
+        log(
+          `Cleanup after failed import skipped: ${
+            cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+          }`
+        );
+      }
+    }
     throw e;
   } finally {
     await insertStmt.close();
