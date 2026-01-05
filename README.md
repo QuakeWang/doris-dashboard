@@ -1,12 +1,12 @@
 # Doris Dashboard
 
 Doris Dashboard is a frontend-only, offline analysis tool for Doris diagnostic artifacts.
-The current MVP focuses on FE audit logs (`fe.audit.log`).
+The current MVP focuses on FE audit logs (`fe.audit.log`) and `__internal_schema.audit_log` table exports (OUTFILE CSV/TSV).
 
 Key features:
 
 - Runs fully in the browser. No backend required; data stays local by default.
-- Import `fe.audit.log` → parse → load into `duckdb-wasm` → aggregate with SQL → visualize (TopSQL, share chart, drill-down).
+- Import `fe.audit.log` or `audit_log` OUTFILE CSV/TSV → parse → load into `duckdb-wasm` → aggregate with SQL → visualize (TopSQL, share chart, drill-down).
 - CPU-heavy parsing/import/query runs in a Web Worker; the main thread focuses on rendering and interactions.
 
 See `docs/architecture.md` and `docs/requirements.md` for design notes.
@@ -25,9 +25,7 @@ npm ci
 npm run dev
 ```
 
-Open the printed local URL (default: `http://localhost:12305`) and import a FE audit log.
-
-Sample data: `data/fe.audit.log`.
+Open the printed local URL (default: `http://localhost:12305`) and import an audit log.
 
 ## Build & Preview
 

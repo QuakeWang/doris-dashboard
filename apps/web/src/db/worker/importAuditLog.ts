@@ -1,6 +1,11 @@
 import * as arrow from "apache-arrow";
+import {
+  type AuditLogOutfileDelimiter,
+  detectOutfileDelimiter,
+  parseAuditLogOutfileLine,
+} from "../../import/auditLogOutfileCsv";
 import { parseAuditLogRecordBlock } from "../../import/auditLogParser";
-import { iterateRecordBlocks } from "../../import/recordReader";
+import { iterateLines, iterateRecordBlocks } from "../../import/recordReader";
 import { ensureDb } from "./engine";
 import { log, reply } from "./messaging";
 import { createAuditLogIndexes, dropAuditLogIndexes } from "./schema";
@@ -13,6 +18,30 @@ const BATCH_SIZE = 5000;
 const MAX_BATCH_BYTES = 8 * 1024 * 1024;
 const LARGE_FILE_CHUNKED_TXN_THRESHOLD_BYTES = 256 * 1024 * 1024;
 const MIN_ARROW_INSERT_ROWS = 200;
+
+type AuditLogInputFormat = "feAuditLog" | "auditLogOutfileCsv";
+
+async function detectAuditLogInputFormat(file: File): Promise<{
+  format: AuditLogInputFormat;
+  outfileDelimiter?: AuditLogOutfileDelimiter;
+}> {
+  const sample = await file.slice(0, 256 * 1024).text();
+  if (sample.includes("|Stmt=") || sample.includes("|QueryId=") || sample.includes("|Time(ms)=")) {
+    return { format: "feAuditLog" };
+  }
+
+  const firstLine =
+    sample
+      .split(/\r?\n/)
+      .find((l) => l.trim().length > 0)
+      ?.trim() ?? null;
+  if (firstLine) {
+    const delimiter = detectOutfileDelimiter(firstLine);
+    if (delimiter) return { format: "auditLogOutfileCsv", outfileDelimiter: delimiter };
+  }
+
+  return { format: "feAuditLog" };
+}
 
 const estimateUtf16Bytes = (v: string | null | undefined): number =>
   typeof v === "string" ? v.length * 2 : 0;
@@ -228,24 +257,25 @@ export async function handleImportAuditLog(
 
   if (useSingleTransaction) await c.query("BEGIN TRANSACTION");
   try {
-    for await (const block of iterateRecordBlocks(file, {
-      signal,
-      onProgress: (p) => {
-        bytesRead = p.bytesRead;
-        maybeEmitProgress();
-      },
-    })) {
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      const parsed = parseAuditLogRecordBlock(block.raw);
-      recordsParsed++;
+    const input = await detectAuditLogInputFormat(file);
+    const onProgress = (p: { bytesRead: number }) => {
+      bytesRead = p.bytesRead;
+      maybeEmitProgress();
+    };
+
+    const processParsed = async (
+      parsed: ReturnType<typeof parseAuditLogRecordBlock>,
+      rawStmt: string | null
+    ): Promise<void> => {
       if (!parsed?.sqlTemplateStripped) {
         badRecords++;
-        continue;
+        return;
       }
+
       const stmtRaw =
-        parsed.stmtRaw && parsed.stmtRaw.length > MAX_STMT_RAW_CHARS
-          ? `${parsed.stmtRaw.slice(0, MAX_STMT_RAW_CHARS)} ...[truncated]`
-          : parsed.stmtRaw;
+        rawStmt && rawStmt.length > MAX_STMT_RAW_CHARS
+          ? `${rawStmt.slice(0, MAX_STMT_RAW_CHARS)} ...[truncated]`
+          : rawStmt;
 
       const strippedTemplate = parsed.sqlTemplateStripped;
       const strippedId = getOrCreateId(
@@ -280,10 +310,32 @@ export async function handleImportAuditLog(
       ]);
 
       batchBytes += estimateRecordBytes(parsed, stmtRaw);
-
       if (recordArrays[0].length >= BATCH_SIZE || batchBytes >= MAX_BATCH_BYTES) {
         await flushBatch();
         maybeEmitProgress(true);
+      }
+    };
+
+    if (input.format === "auditLogOutfileCsv") {
+      const delimiter = input.outfileDelimiter ?? "\t";
+      for await (const line of iterateLines(file, { signal, onProgress })) {
+        if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+        if (!line.trim()) continue;
+        const res = parseAuditLogOutfileLine(line, delimiter);
+        if (res.kind === "header") continue;
+        recordsParsed++;
+        if (res.kind === "invalid") {
+          badRecords++;
+          continue;
+        }
+        await processParsed(res.record, res.record.stmtRaw);
+      }
+    } else {
+      for await (const block of iterateRecordBlocks(file, { signal, onProgress })) {
+        if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const parsed = parseAuditLogRecordBlock(block.raw);
+        recordsParsed++;
+        await processParsed(parsed, parsed?.stmtRaw ?? null);
       }
     }
     await flushBatch();
