@@ -57,13 +57,17 @@ describe("strippingRules", () => {
 describe("parseAuditLogRecordBlock", () => {
   it("parses core fields", () => {
     const line =
-      "2025-12-25 11:17:02,188 [query] |Client=10.0.0.1:123|User=u|Db=d|State=EOF|ErrorCode=0|ErrorMessage=|Time(ms)=13|ScanBytes=10|ScanRows=1|ReturnRows=1|QueryId=q|Stmt=select 1|CpuTimeMS=2|peakMemoryBytes=3|";
+      "2025-12-25 11:17:02,188 [query] |Client=10.0.0.1:123|User=u|Db=d|State=EOF |ErrorCode=0|ErrorMessage=err|WorkloadGroup=wg|cloudClusterName=cc|ComputeGroupName=cg|Time(ms)=13|ScanBytes=10|ScanRows=1|ReturnRows=1|QueryId=q|Stmt=select 1|CpuTimeMS=2|peakMemoryBytes=3|";
     const r = parseAuditLogRecordBlock(line);
     expect(r).not.toBeNull();
     expect(r!.eventTimeMs).toBe(new Date(2025, 11, 25, 11, 17, 2, 188).getTime());
     expect(r!.clientIp).toBe("10.0.0.1");
     expect(r!.userName).toBe("u");
     expect(r!.dbName).toBe("d");
+    expect(r!.state).toBe("EOF");
+    expect(r!.errorMessage).toBe("err");
+    expect(r!.workloadGroup).toBe("wg");
+    expect(r!.cloudClusterName).toBe("cc");
     expect(r!.queryTimeMs).toBe(13);
     expect(r!.cpuTimeMs).toBe(2);
     expect(r!.stmtRaw).toBe("select 1");
@@ -76,6 +80,24 @@ describe("parseAuditLogRecordBlock", () => {
     const r = parseAuditLogRecordBlock(line);
     expect(r).not.toBeNull();
     expect(r!.eventTimeMs).toBe(new Date(2025, 11, 25, 11, 17, 2, 188).getTime());
+  });
+
+  it("treats empty extended fields as null", () => {
+    const line =
+      "2025-12-25 11:17:02,188 [query] |Db=d|ErrorMessage= |WorkloadGroup= |cloudClusterName= |QueryId=q|Stmt=select 1|";
+    const r = parseAuditLogRecordBlock(line);
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toBeNull();
+    expect(r!.workloadGroup).toBeNull();
+    expect(r!.cloudClusterName).toBeNull();
+  });
+
+  it("falls back to ComputeGroupName when cloudClusterName is empty", () => {
+    const line =
+      "2025-12-25 11:17:02,188 [query] |Db=d|cloudClusterName= |ComputeGroupName=cg|QueryId=q|Stmt=select 1|";
+    const r = parseAuditLogRecordBlock(line);
+    expect(r).not.toBeNull();
+    expect(r!.cloudClusterName).toBe("cg");
   });
 
   it("prefers Timestamp field over prefix time", () => {

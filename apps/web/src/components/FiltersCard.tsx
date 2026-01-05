@@ -8,6 +8,16 @@ const { Text } = Typography;
 
 type RangeValue = [Dayjs | null, Dayjs | null] | null;
 
+type TextFilterKey = "userName" | "dbName" | "clientIp" | "cloudClusterName" | "state";
+
+const TEXT_FILTERS: Array<[label: string, key: TextFilterKey, placeholder?: string]> = [
+  ["User", "userName"],
+  ["DB", "dbName"],
+  ["Client IP", "clientIp"],
+  ["Cluster", "cloudClusterName"],
+  ["State", "state", "EOF"],
+];
+
 function rangeToFilterValue(range: RangeValue): Pick<QueryFilters, "startMs" | "endMs"> {
   if (!range || !range[0] || !range[1]) return { startMs: undefined, endMs: undefined };
   const startMs = range[0].valueOf();
@@ -44,6 +54,16 @@ export default function FiltersCard(props: FiltersCardProps): JSX.Element {
       className="dd-filters"
       extra={
         <Space>
+          <Space size={6} align="center">
+            <Text type="secondary" style={{ whiteSpace: "nowrap" }}>
+              Exclude Internal
+            </Text>
+            <Switch
+              checked={draft.excludeInternal ?? true}
+              onChange={(checked) => onPatchDraft({ excludeInternal: checked })}
+              disabled={importing}
+            />
+          </Space>
           <Button icon={<ReloadOutlined />} onClick={onApply} disabled={!datasetId || importing}>
             Apply
           </Button>
@@ -65,8 +85,8 @@ export default function FiltersCard(props: FiltersCardProps): JSX.Element {
       style={{ marginBottom: 12 }}
     >
       <Form layout="vertical" size="small">
-        <Row gutter={[8, 4]}>
-          <Col xs={24} sm={24} md={8}>
+        <Row gutter={[8, 2]}>
+          <Col xs={24} sm={24} md={9}>
             <Form.Item label="Time Range">
               <DatePicker.RangePicker
                 value={filtersToRangeValue(draft)}
@@ -77,63 +97,19 @@ export default function FiltersCard(props: FiltersCardProps): JSX.Element {
               />
             </Form.Item>
           </Col>
-          <Col xs={24} sm={8} md={4}>
-            <Form.Item label="User">
-              <Input
-                value={draft.userName ?? ""}
-                onChange={(e) => onPatchDraft({ userName: e.target.value })}
-                placeholder=""
-                allowClear
-                disabled={importing}
-              />
-            </Form.Item>
-          </Col>
-          <Col xs={24} sm={8} md={3}>
-            <Form.Item label="DB">
-              <Input
-                value={draft.dbName ?? ""}
-                onChange={(e) => onPatchDraft({ dbName: e.target.value })}
-                placeholder=""
-                allowClear
-                disabled={importing}
-              />
-            </Form.Item>
-          </Col>
-          <Col xs={24} sm={8} md={3}>
-            <Form.Item label="Client IP">
-              <Input
-                value={draft.clientIp ?? ""}
-                onChange={(e) => onPatchDraft({ clientIp: e.target.value })}
-                placeholder=""
-                allowClear
-                disabled={importing}
-              />
-            </Form.Item>
-          </Col>
-          <Col xs={24} sm={24} md={6}>
-            <Form.Item label="State">
-              <Space style={{ width: "100%" }} align="center">
+          {TEXT_FILTERS.map(([label, key, placeholder]) => (
+            <Col xs={24} sm={12} md={3} key={key}>
+              <Form.Item label={label}>
                 <Input
-                  value={draft.state ?? ""}
-                  onChange={(e) => onPatchDraft({ state: e.target.value })}
-                  placeholder="EOF"
+                  value={draft[key] ?? ""}
+                  onChange={(e) => onPatchDraft({ [key]: e.target.value } as Partial<QueryFilters>)}
+                  placeholder={placeholder}
                   allowClear
                   disabled={importing}
-                  style={{ flex: 1, minWidth: 0 }}
                 />
-                <Space size={6} align="center">
-                  <Text type="secondary" style={{ whiteSpace: "nowrap" }}>
-                    Exclude Internal
-                  </Text>
-                  <Switch
-                    checked={draft.excludeInternal ?? true}
-                    onChange={(checked) => onPatchDraft({ excludeInternal: checked })}
-                    disabled={importing}
-                  />
-                </Space>
-              </Space>
-            </Form.Item>
-          </Col>
+              </Form.Item>
+            </Col>
+          ))}
         </Row>
       </Form>
     </Card>

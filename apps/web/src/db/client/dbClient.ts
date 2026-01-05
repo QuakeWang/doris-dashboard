@@ -22,12 +22,28 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
+function getOrCreateTabSessionId(): string {
+  const fallback = crypto.randomUUID();
+  if (typeof window === "undefined") return fallback;
+  try {
+    const s = window.sessionStorage;
+    const existing = s.getItem("dd_tab_session_id");
+    if (existing) return existing;
+    s.setItem("dd_tab_session_id", fallback);
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
 export class DbClient {
   private worker: Worker;
   private pending = new Map<string, PendingRequest>();
   private importProgressHandlers = new Map<string, (p: ImportProgress) => void>();
+  private tabSessionId: string;
 
   constructor() {
+    this.tabSessionId = getOrCreateTabSessionId();
     this.worker = new Worker(new URL("../worker/duckdb.worker.ts", import.meta.url), {
       type: "module",
     });
@@ -52,7 +68,7 @@ export class DbClient {
   }
 
   async init(): Promise<void> {
-    await this.request({ type: "init" });
+    await this.request({ type: "init", tabSessionId: this.tabSessionId });
   }
 
   async createDataset(name: string): Promise<{ datasetId: string }> {

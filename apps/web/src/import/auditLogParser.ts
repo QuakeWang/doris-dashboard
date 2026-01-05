@@ -12,12 +12,15 @@ export interface ParsedAuditLogRecord {
   dbName: string | null;
   state: string | null;
   errorCode: number | null;
+  errorMessage: string | null;
   queryTimeMs: number | null;
   cpuTimeMs: number | null;
   scanBytes: number | null;
   scanRows: number | null;
   returnRows: number | null;
   peakMemoryBytes: number | null;
+  workloadGroup: string | null;
+  cloudClusterName: string | null;
   stmtRaw: string | null;
   sqlTemplateStripped: string | null;
   tableGuess: string | null;
@@ -46,12 +49,12 @@ function parseBoolOrNull(v: string | undefined): boolean | null {
   return null;
 }
 
-function normalizeClientIp(v: string | undefined): string | null {
-  if (v == null || v === "") return null;
+function normalizeClientIp(v: string | null | undefined): string | null {
+  if (!v) return null;
   const s = v.trim();
+  if (!s) return null;
   const idx = s.lastIndexOf(":");
-  if (idx > 0) return s.slice(0, idx);
-  return s;
+  return idx > 0 ? s.slice(0, idx) : s;
 }
 
 function parseFirstTableFromQueriedTablesAndViews(v: string | undefined): string | null {
@@ -71,6 +74,24 @@ function parseFirstTableFromQueriedTablesAndViews(v: string | undefined): string
   } catch {
     return null;
   }
+}
+
+function pickFirstStrOrNull(kv: Record<string, string>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = kv[key];
+    if (!v) continue;
+    const s = v.trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+function pickFirstIntOrNull(kv: Record<string, string>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const n = parseIntOrNull(kv[key]);
+    if (n != null) return n;
+  }
+  return null;
 }
 
 function parseEventTimeMs(ts: string): number | null {
@@ -138,20 +159,31 @@ export function parseAuditLogRecordBlock(block: string): ParsedAuditLogRecord | 
 
   const tsMs = kvLower["timestamp"] ? parseEventTimeMs(kvLower["timestamp"]) : null;
   const eventTimeMs = tsMs ?? prefixTimeMs;
-  const isInternal = parseBoolOrNull(kvLower["isinternal"]);
-  const queryId = kvLower["queryid"] ?? null;
-  const userName = kvLower["user"] ?? null;
-  const clientIp = normalizeClientIp(kvLower["client"]);
-  const feIp = kvLower["feip"] ?? kvLower["frontendip"] ?? null;
-  const dbName = kvLower["db"] ?? null;
-  const state = kvLower["state"] ?? null;
-  const errorCode = parseIntOrNull(kvLower["errorcode"]);
+  const isInternal = parseBoolOrNull(kvLower["isinternal"] ?? kvLower["is_internal"]);
+  const queryId = pickFirstStrOrNull(kvLower, "queryid", "query_id");
+  const userName = pickFirstStrOrNull(kvLower, "user", "user_name");
+  const clientIp = normalizeClientIp(pickFirstStrOrNull(kvLower, "client", "client_ip"));
+  const feIp = pickFirstStrOrNull(kvLower, "feip", "frontendip", "fe_ip", "frontend_ip");
+  const dbName = pickFirstStrOrNull(kvLower, "db", "db_name");
+  const state = pickFirstStrOrNull(kvLower, "state");
+  const errorCode = pickFirstIntOrNull(kvLower, "errorcode", "error_code");
+  const errorMessage = pickFirstStrOrNull(kvLower, "errormessage", "error_message");
   const queryTimeMs = parseIntOrNull(kvLower["time(ms)"]);
   const cpuTimeMs = parseIntOrNull(kvLower["cputimems"]);
   const scanBytes = parseIntOrNull(kvLower["scanbytes"]);
   const scanRows = parseIntOrNull(kvLower["scanrows"]);
   const returnRows = parseIntOrNull(kvLower["returnrows"]);
   const peakMemoryBytes = parseIntOrNull(kvLower["peakmemorybytes"]);
+  const workloadGroup = pickFirstStrOrNull(kvLower, "workloadgroup", "workload_group");
+  const cloudClusterName = pickFirstStrOrNull(
+    kvLower,
+    "cloudclustername",
+    "cloud_cluster_name",
+    "computegroupname",
+    "compute_group_name",
+    "computegroup",
+    "compute_group"
+  );
 
   const baseTemplate = stmtRaw ? normalizeSqlBase(stmtRaw) : null;
   const info = baseTemplate ? getTemplateInfo(baseTemplate) : null;
@@ -174,12 +206,15 @@ export function parseAuditLogRecordBlock(block: string): ParsedAuditLogRecord | 
     dbName,
     state,
     errorCode,
+    errorMessage,
     queryTimeMs,
     cpuTimeMs,
     scanBytes,
     scanRows,
     returnRows,
     peakMemoryBytes,
+    workloadGroup,
+    cloudClusterName,
     stmtRaw,
     sqlTemplateStripped: strippedTemplate,
     tableGuess,

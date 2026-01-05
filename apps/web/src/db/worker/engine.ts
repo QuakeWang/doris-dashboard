@@ -24,6 +24,23 @@ let db: duckdb.AsyncDuckDB | null = null;
 let conn: duckdb.AsyncDuckDBConnection | null = null;
 let connPromise: Promise<duckdb.AsyncDuckDBConnection> | null = null;
 
+const SCRATCH_OPFS_BASENAME = "doris_dashboard_scratch";
+
+const fallbackScratchId = crypto.randomUUID();
+let tabSessionId: string | undefined;
+
+export function setTabSessionId(value?: string): void {
+  if (value) tabSessionId = value;
+}
+
+function getScratchOpfsName(): string {
+  const raw = (tabSessionId ?? fallbackScratchId)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 64);
+  return raw ? `${SCRATCH_OPFS_BASENAME}_${raw}.duckdb` : `${SCRATCH_OPFS_BASENAME}.duckdb`;
+}
+
 export async function ensureDb(): Promise<duckdb.AsyncDuckDBConnection> {
   if (conn) return conn;
   if (connPromise) return await connPromise;
@@ -38,14 +55,15 @@ export async function ensureDb(): Promise<duckdb.AsyncDuckDBConnection> {
     const threads = Math.max(1, Math.min(8, Number.isFinite(hc) ? hc : 4));
 
     try {
-      const opfsName = "doris_dashboard.duckdb";
+      const opfsName = getScratchOpfsName();
       await db.registerOPFSFileName(opfsName);
+      await db.dropFile(opfsName).catch(() => {});
       await db.open({
         path: opfsName,
         accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
         maximumThreads: threads,
       });
-      log(`DuckDB storage: OPFS (${opfsName})`);
+      log(`DuckDB storage: OPFS scratch (${opfsName})`);
     } catch (e) {
       log(`DuckDB storage fallback: in-memory (${e instanceof Error ? e.message : String(e)})`);
       await db.open({ maximumThreads: threads });
