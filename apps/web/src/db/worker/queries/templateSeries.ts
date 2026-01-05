@@ -3,6 +3,27 @@ import { ensureDb } from "../engine";
 import { queryWithParams } from "../sql";
 import { buildWhere, num, numOrNull, parseTemplateId, replyOk, toRows } from "./common";
 
+const NICE_BUCKET_SECONDS = [
+  60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800,
+] as const;
+
+const emptySeriesResult = (bucketMs: number): TemplateSeriesResult => ({
+  bucketSeconds: Math.floor(bucketMs / 1000),
+  bucketStarts: [],
+  execCounts: [],
+  totalCpuMs: [],
+  totalTimeMs: [],
+});
+
+function pickNiceBucketMs(minBucketMs: number): number {
+  const minBucketSeconds = Math.max(1, Math.ceil(minBucketMs / 1000));
+  for (const s of NICE_BUCKET_SECONDS) {
+    if (s >= minBucketSeconds) return s * 1000;
+  }
+  const days = Math.ceil(minBucketSeconds / 86400);
+  return Math.max(1, days) * 86400 * 1000;
+}
+
 export async function handleQueryTemplateSeries(
   requestId: string,
   datasetId: string,
@@ -13,7 +34,7 @@ export async function handleQueryTemplateSeries(
   const c = await ensureDb();
   const where = buildWhere(datasetId, filters);
   const templateId = parseTemplateId(templateHash);
-  const bucketMs = Math.max(1, Math.floor(bucketSeconds)) * 1000;
+  let bucketMs = Math.max(1, Math.floor(bucketSeconds)) * 1000;
 
   const rangeRes = await queryWithParams(
     c,
@@ -24,25 +45,29 @@ export async function handleQueryTemplateSeries(
   const minMs = numOrNull(rangeRow?.min_time_ms);
   const maxMs = numOrNull(rangeRow?.max_time_ms);
   if (minMs == null || maxMs == null || !Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
-    replyOk(requestId, {
-      bucketSeconds: Math.floor(bucketMs / 1000),
-      bucketStarts: [],
-      execCounts: [],
-      totalCpuMs: [],
-      totalTimeMs: [],
-    });
+    replyOk(requestId, emptySeriesResult(bucketMs));
     return;
   }
 
   const startMs = filters.startMs != null ? filters.startMs : minMs;
   const endMsExclusive = filters.endMs != null ? filters.endMs : maxMs + 1;
-  const startBucketMs = Math.floor(startMs / bucketMs) * bucketMs;
-  const endBucketExclusiveMs = Math.ceil(endMsExclusive / bucketMs) * bucketMs;
+  const MAX_BUCKETS = 2000;
+  let startBucketMs = 0;
+  let endBucketExclusiveMs = 0;
+  while (true) {
+    startBucketMs = Math.floor(startMs / bucketMs) * bucketMs;
+    endBucketExclusiveMs = Math.ceil(endMsExclusive / bucketMs) * bucketMs;
+    const bucketCount = Math.floor((endBucketExclusiveMs - startBucketMs) / bucketMs);
+    if (bucketCount <= MAX_BUCKETS) break;
+    bucketMs = pickNiceBucketMs(Math.ceil((endBucketExclusiveMs - startBucketMs) / MAX_BUCKETS));
+  }
 
   const bucketStartsMs: number[] = [];
   for (let t = startBucketMs; t < endBucketExclusiveMs; t += bucketMs) bucketStartsMs.push(t);
-  if (bucketStartsMs.length > 2000)
-    throw new Error("Too many buckets. Use a larger bucket size or narrower time range.");
+  if (bucketStartsMs.length > MAX_BUCKETS) {
+    replyOk(requestId, emptySeriesResult(bucketMs));
+    return;
+  }
   const bucketStarts = bucketStartsMs.map((t) => new Date(t).toISOString());
 
   const seriesRes = await queryWithParams(

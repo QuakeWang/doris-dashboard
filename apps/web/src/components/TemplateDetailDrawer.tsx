@@ -14,7 +14,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DbClient } from "../db/client/dbClient";
 import type {
   DimensionRankBy,
@@ -53,6 +53,17 @@ export interface TemplateDetailDrawerProps {
 
 type SeriesMetric = "execCount" | "totalCpuMs" | "totalTimeMs";
 type DimsData = { users: DimensionTopRow[]; dbs: DimensionTopRow[]; ips: DimensionTopRow[] };
+
+const BUCKET_SECONDS_OPTIONS = [
+  60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800,
+] as const;
+
+function formatBucketLabel(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
 
 function sumNumbers(values: number[] | null | undefined): number {
   return values?.reduce((sum, v) => sum + v, 0) ?? 0;
@@ -153,6 +164,13 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
   const { data: samples, loading: samplesLoading, error: samplesError } = samplesQuery;
   const { data: dimsData, loading: dimsLoading, error: dimsError } = dimsQuery;
   const { users: topUsers, dbs: topDbs, ips: topIps } = dimsData;
+
+  const seriesBucketSeconds = series?.bucketSeconds;
+  useEffect(() => {
+    if (!enabled) return;
+    if (!seriesBucketSeconds || seriesBucketSeconds <= 0) return;
+    if (seriesBucketSeconds !== bucketSeconds) setBucketSeconds(seriesBucketSeconds);
+  }, [bucketSeconds, enabled, seriesBucketSeconds]);
 
   const computedTotals = useMemo(() => {
     return {
@@ -286,12 +304,14 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                           value={bucketSeconds}
                           onChange={(v) => setBucketSeconds(v)}
                           style={{ width: 140 }}
-                          options={[
-                            { value: 60, label: "bucket: 1m" },
-                            { value: 300, label: "bucket: 5m" },
-                            { value: 900, label: "bucket: 15m" },
-                            { value: 3600, label: "bucket: 1h" },
-                          ]}
+                          options={Array.from(
+                            new Set<number>([
+                              ...BUCKET_SECONDS_OPTIONS,
+                              ...(Number.isFinite(bucketSeconds) ? [bucketSeconds] : []),
+                            ])
+                          )
+                            .sort((a, b) => a - b)
+                            .map((v) => ({ value: v, label: `bucket: ${formatBucketLabel(v)}` }))}
                         />
                         <Button
                           icon={<ReloadOutlined />}

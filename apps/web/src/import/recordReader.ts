@@ -16,6 +16,17 @@ export interface RecordReaderOptions {
 const DEFAULT_RECORD_START_REGEX =
   /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:[,.]\d{3,6})?(?:Z|[+-]\d{2}:?\d{2})?(?:\s+\[[^\]]+\])?\s+/;
 
+export type LineReaderOptions = Omit<RecordReaderOptions, "recordStartRegex">;
+
+export async function* iterateLines(
+  file: Blob,
+  options: LineReaderOptions = {}
+): AsyncGenerator<string> {
+  for await (const block of iterateRecordBlocks(file, { ...options, recordStartRegex: /^/ })) {
+    yield block.raw;
+  }
+}
+
 export async function* iterateRecordBlocks(
   file: Blob,
   options: RecordReaderOptions = {}

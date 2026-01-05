@@ -19,7 +19,7 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
   return (
     <Card
       style={{ marginBottom: 12 }}
-      title="Import FE Audit Log"
+      title="Import Audit Log"
       size="small"
       extra={
         <Space>
