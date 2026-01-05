@@ -1,5 +1,5 @@
 import type { WorkerRequest } from "../client/protocol";
-import { ensureDb } from "./engine";
+import { ensureDb, setTabSessionId } from "./engine";
 import { handleCancel, handleImportAuditLog } from "./importAuditLog";
 import { fail, reply } from "./messaging";
 import {
@@ -16,6 +16,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   try {
     switch (msg.type) {
       case "init":
+        setTabSessionId(msg.tabSessionId);
         await ensureDb();
         return reply({
           type: "response",

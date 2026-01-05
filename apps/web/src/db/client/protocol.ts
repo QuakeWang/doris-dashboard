@@ -6,10 +6,11 @@ export interface QueryFilters {
   dbName?: string;
   clientIp?: string;
   state?: string;
+  cloudClusterName?: string;
 }
 
 export type WorkerRequest =
-  | { type: "init"; requestId: string }
+  | { type: "init"; requestId: string; tabSessionId?: string }
   | { type: "createDataset"; requestId: string; name: string }
   | { type: "importAuditLog"; requestId: string; datasetId: string; file: File }
   | {

@@ -30,12 +30,15 @@ const estimateRecordBytes = (
     estimateUtf16Bytes(parsed.feIp) +
     estimateUtf16Bytes(parsed.dbName) +
     estimateUtf16Bytes(parsed.state) +
+    estimateUtf16Bytes(parsed.errorMessage) +
+    estimateUtf16Bytes(parsed.workloadGroup) +
+    estimateUtf16Bytes(parsed.cloudClusterName) +
     256
   );
 };
 
 const RECORD_COLS =
-  "dataset_id,record_id,event_time_ms,is_internal,query_id,user_name,client_ip,fe_ip,db_name,state,error_code,query_time_ms,cpu_time_ms,scan_bytes,scan_rows,return_rows,peak_memory_bytes,stmt_raw,stripped_template_id".split(
+  "dataset_id,record_id,event_time_ms,is_internal,query_id,user_name,client_ip,fe_ip,db_name,state,error_code,error_message,query_time_ms,cpu_time_ms,scan_bytes,scan_rows,return_rows,peak_memory_bytes,workload_group,cloud_cluster_name,stmt_raw,stripped_template_id".split(
     ","
   ) as readonly string[];
 const RECORD_INSERT_SQL = `INSERT INTO audit_log_records (${RECORD_COLS.join(", ")}) VALUES (${RECORD_COLS.map(() => "?").join(", ")})`;
@@ -263,12 +266,15 @@ export async function handleImportAuditLog(
         parsed.dbName,
         parsed.state,
         parsed.errorCode,
+        parsed.errorMessage,
         parsed.queryTimeMs,
         parsed.cpuTimeMs,
         parsed.scanBytes,
         parsed.scanRows,
         parsed.returnRows,
         parsed.peakMemoryBytes,
+        parsed.workloadGroup,
+        parsed.cloudClusterName,
         stmtRaw,
         strippedId,
       ]);

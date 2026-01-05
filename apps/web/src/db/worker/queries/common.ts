@@ -51,6 +51,7 @@ export function buildWhere(
     [filters.dbName, "db_name"],
     [filters.clientIp, "client_ip"],
     [filters.state, "state"],
+    [filters.cloudClusterName, "cloud_cluster_name"],
   ];
   for (const [v, name] of strEq) {
     const s = v?.trim();
