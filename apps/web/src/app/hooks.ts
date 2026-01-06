@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { DbClient } from "../db/client/dbClient";
 import type { OverviewResult, QueryFilters, ShareRow, TopSqlRow } from "../db/client/protocol";
 import type { AsyncData } from "../utils/useAsync";
@@ -54,10 +54,13 @@ export function useDuckDbSession(
   ready: boolean;
   datasetId: string | null;
   createDataset: (name: string) => Promise<string>;
+  retryInit: () => void;
 } {
   const [ready, setReady] = useState(false);
   const [datasetId, setDatasetId] = useState<string | null>(null);
 
+  const [initToken, bumpInitToken] = useReducer((x: number) => x + 1, 0);
+  const initSeqRef = useRef(0);
   const createSeqRef = useRef(0);
 
   const createDataset = useCallback(
@@ -70,19 +73,38 @@ export function useDuckDbSession(
     [client]
   );
 
+  const retryInit = useCallback(() => {
+    setError(null);
+    setReady(false);
+    bumpInitToken();
+  }, [setError]);
+
   useEffect(() => {
+    const seq = ++initSeqRef.current;
     client
       .init()
-      .then(() => setReady(true))
-      .catch((e) => setError(toErrorMessage(e)));
-  }, [client, setError]);
+      .then(() => {
+        if (seq !== initSeqRef.current) return;
+        setError(null);
+        setReady(true);
+      })
+      .catch((e) => {
+        if (seq !== initSeqRef.current) return;
+        const message = toErrorMessage(e);
+        if (message.toLowerCase().includes("timed out") && message.includes("type=init")) {
+          setError("DuckDB initialization timed out. Click Retry or reload the page.");
+          return;
+        }
+        setError(message);
+      });
+  }, [client, initToken, setError]);
 
   useEffect(() => {
     if (!ready || datasetId) return;
     createDataset("session").catch((e) => setError(toErrorMessage(e)));
   }, [createDataset, datasetId, ready, setError]);
 
-  return { ready, datasetId, createDataset };
+  return { ready, datasetId, createDataset, retryInit };
 }
 
 export function useDatasetQueries(params: {
