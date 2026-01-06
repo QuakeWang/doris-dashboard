@@ -46,7 +46,7 @@ export async function ensureDb(): Promise<duckdb.AsyncDuckDBConnection> {
   if (connPromise) return await connPromise;
   connPromise = (async (): Promise<duckdb.AsyncDuckDBConnection> => {
     const bundle = await duckdb.selectBundle(DUCKDB_BUNDLES);
-    const engineWorker = new Worker(bundle.mainWorker!, { type: "module" });
+    const engineWorker = new Worker(bundle.mainWorker!);
     const logger = new duckdb.ConsoleLogger();
     db = new duckdb.AsyncDuckDB(logger, engineWorker);
     await db.instantiate(bundle.mainModule!, bundle.pthreadWorker);

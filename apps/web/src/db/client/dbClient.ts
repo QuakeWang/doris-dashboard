@@ -20,6 +20,7 @@ type WorkerRequestWithoutId = WithoutRequestId<WorkerRequest>;
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
 };
 
 function getOrCreateTabSessionId(): string {
@@ -41,11 +42,28 @@ export class DbClient {
   private pending = new Map<string, PendingRequest>();
   private importProgressHandlers = new Map<string, (p: ImportProgress) => void>();
   private tabSessionId: string;
+  private workerFatalError: Error | null = null;
 
   constructor() {
     this.tabSessionId = getOrCreateTabSessionId();
     this.worker = new Worker(new URL("../worker/duckdb.worker.ts", import.meta.url), {
       type: "module",
+    });
+    this.worker.addEventListener("error", (ev: ErrorEvent) => {
+      const fromError = ev.error instanceof Error ? ev.error.message : "";
+      const message = ev.message || fromError || "Unknown worker error";
+      const error = new Error(
+        ev.filename ? `${message} (${ev.filename}:${ev.lineno}:${ev.colno})` : message
+      );
+      this.workerFatalError = error;
+      console.error("[duckdb.worker] error:", error.message, ev.error);
+      this.rejectAllPending(error);
+    });
+    this.worker.addEventListener("messageerror", () => {
+      console.error("[duckdb.worker] messageerror");
+      const error = new Error("Worker message deserialization failed");
+      this.workerFatalError = error;
+      this.rejectAllPending(error);
     });
     this.worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
       const msg = ev.data;
@@ -55,20 +73,23 @@ export class DbClient {
           if (handler) handler(msg.event.progress);
         }
         if (msg.event.type === "log") {
-          console.debug(`[duckdb.worker] ${msg.event.message}`);
+          console.info(`[duckdb.worker] ${msg.event.message}`);
         }
         return;
       }
       const pending = this.pending.get(msg.requestId);
       if (!pending) return;
       this.pending.delete(msg.requestId);
+      if (pending.timeoutId) clearTimeout(pending.timeoutId);
       if (msg.ok) pending.resolve(msg.result);
       else pending.reject(new Error(msg.error.message));
     };
   }
 
   async init(): Promise<void> {
-    await this.request({ type: "init", tabSessionId: this.tabSessionId });
+    await this.request({ type: "init", tabSessionId: this.tabSessionId }, undefined, {
+      timeoutMs: 45_000,
+    });
   }
 
   async createDataset(name: string): Promise<{ datasetId: string }> {
@@ -161,21 +182,59 @@ export class DbClient {
     await this.request({ type: "cancel" });
   }
 
-  private async request<T = unknown>(req: WorkerRequestWithoutId, requestId?: string): Promise<T> {
+  private async request<T = unknown>(
+    req: WorkerRequestWithoutId,
+    requestId?: string,
+    options?: { timeoutMs?: number }
+  ): Promise<T> {
+    if (this.workerFatalError) throw this.workerFatalError;
     const id = requestId ?? this.newRequestId();
     const msg: WorkerRequest = { ...(req as WorkerRequest), requestId: id };
 
     const promise = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
+      const timeoutMs = options?.timeoutMs;
+      const pending: PendingRequest = {
         resolve: resolve as unknown as PendingRequest["resolve"],
         reject: reject as unknown as PendingRequest["reject"],
-      });
+      };
+      if (timeoutMs != null && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        pending.timeoutId = setTimeout(() => {
+          if (!this.pending.has(id)) return;
+          this.pending.delete(id);
+          reject(
+            new Error(
+              `Worker request timed out after ${timeoutMs}ms (type=${(req as WorkerRequestWithoutId).type})`
+            )
+          );
+        }, timeoutMs);
+      }
+      this.pending.set(id, pending);
     });
-    this.worker.postMessage(msg);
+    try {
+      this.worker.postMessage(msg);
+    } catch (e) {
+      const pending = this.pending.get(id);
+      if (pending?.timeoutId) clearTimeout(pending.timeoutId);
+      this.pending.delete(id);
+      throw e instanceof Error ? e : new Error(String(e));
+    }
     return promise;
   }
 
   private newRequestId(): string {
     return crypto.randomUUID();
+  }
+
+  private rejectAllPending(error: Error): void {
+    const pendings = [...this.pending.values()];
+    this.pending.clear();
+    for (const p of pendings) {
+      if (p.timeoutId) clearTimeout(p.timeoutId);
+      try {
+        p.reject(error);
+      } catch {
+        // ignore
+      }
+    }
   }
 }

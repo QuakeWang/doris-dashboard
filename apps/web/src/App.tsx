@@ -152,7 +152,7 @@ export default function App(): JSX.Element {
       />
 
       <Content style={{ padding: 24, maxWidth: 1360, width: "100%", margin: "0 auto" }}>
-        {!ready && (
+        {!ready && !error && (
           <Card>
             <Spin /> <Text>Initializing DuckDB...</Text>
           </Card>
@@ -163,7 +163,7 @@ export default function App(): JSX.Element {
             message="Error"
             description={<Text style={{ whiteSpace: "pre-wrap" }}>{error}</Text>}
             showIcon
-            closable
+            closable={ready}
             style={{ marginBottom: 12 }}
             onClose={() => setError(null)}
           />
