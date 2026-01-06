@@ -1,4 +1,4 @@
-import { Alert, Card, Layout, Spin, Tabs, Typography } from "antd";
+import { Alert, Button, Card, Layout, Space, Spin, Tabs, Typography } from "antd";
 import { useMemo, useState } from "react";
 import {
   type TabKey,
@@ -29,7 +29,7 @@ export default function App(): JSX.Element {
   const isCoi = typeof window !== "undefined" && window.crossOriginIsolated === true;
 
   const [error, setError] = useState<string | null>(null);
-  const { ready, datasetId, createDataset } = useDuckDbSession(client, setError);
+  const { ready, datasetId, createDataset, retryInit } = useDuckDbSession(client, setError);
 
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -164,6 +164,23 @@ export default function App(): JSX.Element {
             description={<Text style={{ whiteSpace: "pre-wrap" }}>{error}</Text>}
             showIcon
             closable={ready}
+            action={
+              !ready ? (
+                <Space>
+                  <Button size="small" onClick={retryInit}>
+                    Retry
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      if (typeof window !== "undefined") window.location.reload();
+                    }}
+                  >
+                    Reload
+                  </Button>
+                </Space>
+              ) : null
+            }
             style={{ marginBottom: 12 }}
             onClose={() => setError(null)}
           />
@@ -191,7 +208,7 @@ export default function App(): JSX.Element {
           importing={importing}
           importProgress={importProgress}
           onImport={runImport}
-          onCancel={() => void client.cancelCurrentTask()}
+          onCancel={() => void client.cancelCurrentTask().catch(() => {})}
         />
 
         <FiltersCard

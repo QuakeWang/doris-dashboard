@@ -73,7 +73,8 @@ export class DbClient {
           if (handler) handler(msg.event.progress);
         }
         if (msg.event.type === "log") {
-          console.info(`[duckdb.worker] ${msg.event.message}`);
+          if (import.meta.env.DEV) console.info(`[duckdb.worker] ${msg.event.message}`);
+          else console.debug(`[duckdb.worker] ${msg.event.message}`);
         }
         return;
       }
