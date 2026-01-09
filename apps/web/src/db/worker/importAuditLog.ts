@@ -266,10 +266,10 @@ export async function handleImportAuditLog(
     const processParsed = async (
       parsed: ReturnType<typeof parseAuditLogRecordBlock>,
       rawStmt: string | null
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       if (!parsed?.sqlTemplateStripped) {
         badRecords++;
-        return;
+        return false;
       }
 
       const stmtRaw =
@@ -314,6 +314,7 @@ export async function handleImportAuditLog(
         await flushBatch();
         maybeEmitProgress(true);
       }
+      return true;
     };
 
     if (input.format === "auditLogOutfileCsv") {
@@ -331,11 +332,21 @@ export async function handleImportAuditLog(
         await processParsed(res.record, res.record.stmtRaw);
       }
     } else {
+      let lastQueryTagQueryId: string | null = null;
       for await (const block of iterateRecordBlocks(file, { signal, onProgress })) {
         if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-        const parsed = parseAuditLogRecordBlock(block.raw);
+        const firstNl = block.raw.indexOf("\n");
+        const firstLine = firstNl >= 0 ? block.raw.slice(0, firstNl) : block.raw;
+        const isSlowQueryTag = firstLine.includes("[slow_query]");
+        const isQueryTag = !isSlowQueryTag && firstLine.includes("[query]");
+        if (isSlowQueryTag) {
+          const qid = extractQueryId(block.raw);
+          if (qid && qid === lastQueryTagQueryId) continue;
+        }
         recordsParsed++;
-        await processParsed(parsed, parsed?.stmtRaw ?? null);
+        const parsed = parseAuditLogRecordBlock(block.raw);
+        const ok = await processParsed(parsed, parsed?.stmtRaw ?? null);
+        if (ok && isQueryTag && parsed?.queryId) lastQueryTagQueryId = parsed.queryId;
       }
     }
     await flushBatch();
@@ -367,4 +378,14 @@ export async function handleImportAuditLog(
   }
 
   reply({ type: "response", requestId, ok: true, result: { recordsInserted, badRecords } });
+}
+
+function extractQueryId(raw: string): string | null {
+  const key = "|QueryId=";
+  const start = raw.indexOf(key);
+  if (start < 0) return null;
+  const valueStart = start + key.length;
+  const end = raw.indexOf("|", valueStart);
+  const v = (end < 0 ? raw.slice(valueStart) : raw.slice(valueStart, end)).trim();
+  return v.length > 0 ? v : null;
 }

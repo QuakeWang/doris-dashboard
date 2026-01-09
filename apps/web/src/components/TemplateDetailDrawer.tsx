@@ -21,9 +21,11 @@ import type {
   DimensionTopRow,
   QueryFilters,
   QuerySampleRow,
+  SampleOrderBy,
   TemplateSeriesResult,
 } from "../db/client/protocol";
 import { formatBytes, formatDurationMs, formatNumber, formatSqlLabel } from "../utils/format";
+import { compareNullableNumber } from "../utils/sort";
 import { useAsyncData } from "../utils/useAsync";
 import AsyncContent from "./AsyncContent";
 import CopyIconButton from "./CopyIconButton";
@@ -35,11 +37,11 @@ export interface TemplateRef {
   templateHash: string;
   template: string;
   tableGuess?: string | null;
-  execCount?: number;
-  totalCpuMs?: number;
-  totalTimeMs?: number;
+  execCount: number;
+  totalCpuMs: number;
+  totalTimeMs: number;
   p95TimeMs?: number | null;
-  maxTimeMs?: number;
+  maxPeakMemBytes: number | null;
 }
 
 export interface TemplateDetailDrawerProps {
@@ -58,15 +60,17 @@ const BUCKET_SECONDS_OPTIONS = [
   60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800,
 ] as const;
 
+const SAMPLES_ORDER_LABEL: Record<SampleOrderBy, string> = {
+  queryTimeMs: "query_time_ms",
+  cpuTimeMs: "cpu_time_ms",
+  peakMemoryBytes: "peak_memory_bytes",
+};
+
 function formatBucketLabel(seconds: number): string {
   if (seconds % 86400 === 0) return `${seconds / 86400}d`;
   if (seconds % 3600 === 0) return `${seconds / 3600}h`;
   if (seconds % 60 === 0) return `${seconds / 60}m`;
   return `${seconds}s`;
-}
-
-function sumNumbers(values: number[] | null | undefined): number {
-  return values?.reduce((sum, v) => sum + v, 0) ?? 0;
 }
 
 const renderNullableText = (v: string | null) => v ?? "-";
@@ -82,15 +86,23 @@ const SAMPLE_COLUMNS: ColumnsType<QuerySampleRow> = [
     title: "Query Time",
     dataIndex: "queryTimeMs",
     width: 110,
-    sorter: (a, b) => (a.queryTimeMs ?? 0) - (b.queryTimeMs ?? 0),
+    sorter: (a, b, sortOrder) => compareNullableNumber(a.queryTimeMs, b.queryTimeMs, sortOrder),
     render: formatDurationMs,
   },
   {
     title: "CPU",
     dataIndex: "cpuTimeMs",
     width: 90,
-    sorter: (a, b) => (a.cpuTimeMs ?? 0) - (b.cpuTimeMs ?? 0),
+    sorter: (a, b, sortOrder) => compareNullableNumber(a.cpuTimeMs, b.cpuTimeMs, sortOrder),
     render: formatDurationMs,
+  },
+  {
+    title: "Peak Mem",
+    dataIndex: "peakMemoryBytes",
+    width: 110,
+    sorter: (a, b, sortOrder) =>
+      compareNullableNumber(a.peakMemoryBytes, b.peakMemoryBytes, sortOrder),
+    render: formatBytes,
   },
   {
     title: "Scan",
@@ -127,6 +139,7 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
   const [seriesMetric, setSeriesMetric] = useState<SeriesMetric>("totalCpuMs");
 
   const [dimRankBy, setDimRankBy] = useState<DimensionRankBy>("totalCpuMs");
+  const [samplesOrderBy, setSamplesOrderBy] = useState<SampleOrderBy>("queryTimeMs");
   const enabled = open && !!datasetId && !!template;
 
   const seriesQuery = useAsyncData<TemplateSeriesResult | null>(
@@ -138,8 +151,8 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
 
   const samplesQuery = useAsyncData<QuerySampleRow[]>(
     enabled,
-    () => client.querySamples(datasetId!, template!.templateHash, 50, "queryTimeMs", filters),
-    [client, datasetId, filters, template],
+    () => client.querySamples(datasetId!, template!.templateHash, 50, samplesOrderBy, filters),
+    [client, datasetId, filters, samplesOrderBy, template],
     []
   );
 
@@ -171,14 +184,6 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
     if (!seriesBucketSeconds || seriesBucketSeconds <= 0) return;
     if (seriesBucketSeconds !== bucketSeconds) setBucketSeconds(seriesBucketSeconds);
   }, [bucketSeconds, enabled, seriesBucketSeconds]);
-
-  const computedTotals = useMemo(() => {
-    return {
-      execCount: series ? sumNumbers(series.execCounts) : undefined,
-      totalCpuMs: series ? sumNumbers(series.totalCpuMs) : undefined,
-      totalTimeMs: series ? sumNumbers(series.totalTimeMs) : undefined,
-    };
-  }, [series]);
 
   const seriesOption = useMemo(() => {
     if (!series || series.bucketStarts.length === 0) return null;
@@ -226,6 +231,8 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
     ? `Template Detail · ${formatSqlLabel(template.template, 64)}`
     : "Template Detail";
 
+  const samplesTitleOrderLabel = SAMPLES_ORDER_LABEL[samplesOrderBy];
+
   return (
     <Drawer title={drawerTitle} width={920} onClose={onClose} open={open}>
       {!template ? (
@@ -236,15 +243,15 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
             {[
               {
                 title: "Total CPU",
-                value: formatDurationMs(template.totalCpuMs ?? computedTotals.totalCpuMs),
+                value: formatDurationMs(template.totalCpuMs),
               },
               {
                 title: "Total Time",
-                value: formatDurationMs(template.totalTimeMs ?? computedTotals.totalTimeMs),
+                value: formatDurationMs(template.totalTimeMs),
               },
               {
                 title: "Count",
-                value: formatNumber(template.execCount ?? computedTotals.execCount ?? 0),
+                value: formatNumber(template.execCount),
               },
               { title: "P95 Time", value: formatDurationMs(template.p95TimeMs ?? null) },
             ].map((s) => (
@@ -252,6 +259,14 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                 <Statistic title={s.title} value={s.value} />
               </Col>
             ))}
+          </Row>
+          <Row gutter={12}>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="Max Peak Mem"
+                value={formatBytes(template.maxPeakMemBytes ?? null)}
+              />
+            </Col>
           </Row>
 
           <Card
@@ -335,9 +350,33 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
               },
               {
                 key: "samples",
-                label: "Slow Samples",
+                label: "Samples",
                 children: (
-                  <Card size="small" title="Slowest Queries (Top 50 by query_time_ms)">
+                  <Card
+                    size="small"
+                    title={`Top Samples (Top 50 by ${samplesTitleOrderLabel})`}
+                    extra={
+                      <Space>
+                        <Select
+                          value={samplesOrderBy}
+                          onChange={(v) => setSamplesOrderBy(v)}
+                          style={{ width: 220 }}
+                          options={[
+                            { value: "queryTimeMs", label: "order: query_time_ms" },
+                            { value: "cpuTimeMs", label: "order: cpu_time_ms" },
+                            { value: "peakMemoryBytes", label: "order: peak_memory_bytes" },
+                          ]}
+                        />
+                        <Button
+                          icon={<ReloadOutlined />}
+                          onClick={() => samplesQuery.reload()}
+                          disabled={!datasetId || samplesLoading}
+                        >
+                          Refresh
+                        </Button>
+                      </Space>
+                    }
+                  >
                     <AsyncContent
                       loading={samplesLoading}
                       error={samplesError}
@@ -349,7 +388,7 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                         pagination={{ pageSize: 10 }}
                         columns={SAMPLE_COLUMNS}
                         dataSource={samples}
-                        scroll={{ x: 980 }}
+                        scroll={{ x: 1200 }}
                       />
                     </AsyncContent>
                   </Card>

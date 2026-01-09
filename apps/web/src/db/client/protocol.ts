@@ -9,6 +9,8 @@ export interface QueryFilters {
   cloudClusterName?: string;
 }
 
+export type ShareRankBy = "totalCpuMs" | "totalTimeMs" | "maxPeakMemBytes";
+
 export type WorkerRequest =
   | { type: "init"; requestId: string; tabSessionId?: string }
   | { type: "createDataset"; requestId: string; name: string }
@@ -31,7 +33,7 @@ export type WorkerRequest =
       requestId: string;
       datasetId: string;
       topN: number;
-      rankBy: "totalCpuMs" | "totalTimeMs";
+      rankBy: ShareRankBy;
       filters: QueryFilters;
     }
   | {
@@ -93,6 +95,7 @@ export interface TopSqlRow {
   avgTimeMs: number;
   maxTimeMs: number;
   p95TimeMs: number | null;
+  maxPeakMemBytes: number | null;
 }
 
 export interface OverviewResult {
@@ -123,6 +126,7 @@ export interface ShareRow {
   totalTimeMs: number;
   cpuShare: number;
   timeShare: number;
+  maxPeakMemBytes: number | null;
   isOthers: boolean;
 }
 
@@ -141,7 +145,7 @@ export interface TableTopRow {
   totalTimeMs: number;
 }
 
-export type SampleOrderBy = "queryTimeMs" | "cpuTimeMs";
+export type SampleOrderBy = "queryTimeMs" | "cpuTimeMs" | "peakMemoryBytes";
 
 export interface QuerySampleRow {
   recordId: number;
@@ -153,6 +157,7 @@ export interface QuerySampleRow {
   state: string | null;
   queryTimeMs: number | null;
   cpuTimeMs: number | null;
+  peakMemoryBytes: number | null;
   scanBytes: number | null;
   scanRows: number | null;
   returnRows: number | null;

@@ -7,6 +7,7 @@ import type {
   QueryFilters,
   QuerySampleRow,
   SampleOrderBy,
+  ShareRankBy,
   ShareRow,
   TemplateSeriesResult,
   TopSqlRow,
@@ -122,7 +123,7 @@ export class DbClient {
   async queryShare(
     datasetId: string,
     topN: number,
-    rankBy: "totalCpuMs" | "totalTimeMs",
+    rankBy: ShareRankBy,
     filters: QueryFilters
   ): Promise<ShareRow[]> {
     return await this.request<ShareRow[]>({ type: "queryShare", datasetId, topN, rankBy, filters });

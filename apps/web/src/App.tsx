@@ -15,7 +15,13 @@ import ShareTab from "./components/ShareTab";
 import TemplateDetailDrawer, { type TemplateRef } from "./components/TemplateDetailDrawer";
 import TopSqlTab from "./components/TopSqlTab";
 import { DbClient } from "./db/client/dbClient";
-import type { ImportProgress, QueryFilters, ShareRow, TopSqlRow } from "./db/client/protocol";
+import type {
+  ImportProgress,
+  QueryFilters,
+  ShareRankBy,
+  ShareRow,
+  TopSqlRow,
+} from "./db/client/protocol";
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -42,8 +48,8 @@ export default function App(): JSX.Element {
   const [topSqlSearch, setTopSqlSearch] = useState("");
   const [templateDrawer, setTemplateDrawer] = useState<TemplateRef | null>(null);
 
-  const [shareMetric, setShareMetric] = useState<"cpu" | "time">("cpu");
-  const [shareRankBy, setShareRankBy] = useState<"totalCpuMs" | "totalTimeMs">("totalCpuMs");
+  const [shareMetric, setShareMetric] = useState<"cpu" | "time" | "memory">("cpu");
+  const [shareRankBy, setShareRankBy] = useState<ShareRankBy>("totalCpuMs");
   const [shareChartType, setShareChartType] = useState<"bar" | "pie">("bar");
   const [shareTopN, setShareTopN] = useState(12);
 
@@ -129,7 +135,7 @@ export default function App(): JSX.Element {
       totalCpuMs: row.totalCpuMs,
       totalTimeMs: row.totalTimeMs,
       p95TimeMs: row.p95TimeMs,
-      maxTimeMs: row.maxTimeMs,
+      maxPeakMemBytes: row.maxPeakMemBytes,
     });
 
   const openTemplateFromShare = (row: ShareRow) =>
@@ -139,6 +145,7 @@ export default function App(): JSX.Element {
       execCount: row.execCount,
       totalCpuMs: row.totalCpuMs,
       totalTimeMs: row.totalTimeMs,
+      maxPeakMemBytes: row.maxPeakMemBytes,
     });
 
   return (
@@ -273,7 +280,12 @@ export default function App(): JSX.Element {
                   rankBy={shareRankBy}
                   chartType={shareChartType}
                   topN={shareTopN}
-                  onMetricChange={setShareMetric}
+                  onMetricChange={(m) => {
+                    setShareMetric(m);
+                    if (m === "memory") setShareRankBy("maxPeakMemBytes");
+                    else if (shareRankBy === "maxPeakMemBytes")
+                      setShareRankBy(m === "time" ? "totalTimeMs" : "totalCpuMs");
+                  }}
                   onRankByChange={setShareRankBy}
                   onChartTypeChange={setShareChartType}
                   onTopNChange={setShareTopN}

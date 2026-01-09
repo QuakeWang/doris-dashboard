@@ -2,7 +2,8 @@ import { Button, Card, Input, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo } from "react";
 import type { TopSqlRow } from "../db/client/protocol";
-import { formatDurationMs, formatNumber } from "../utils/format";
+import { formatBytes, formatDurationMs, formatNumber } from "../utils/format";
+import { compareNullableNumber } from "../utils/sort";
 import CopyIconButton from "./CopyIconButton";
 
 const { Text } = Typography;
@@ -46,6 +47,14 @@ export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
         render: (v: number) => formatDurationMs(v),
       },
       {
+        title: "peak_memory_bytes (max)",
+        dataIndex: "maxPeakMemBytes",
+        width: 140,
+        sorter: (a, b, sortOrder) =>
+          compareNullableNumber(a.maxPeakMemBytes, b.maxPeakMemBytes, sortOrder),
+        render: (v: number | null) => formatBytes(v),
+      },
+      {
         title: "Count",
         dataIndex: "execCount",
         width: 100,
@@ -63,7 +72,7 @@ export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
         title: "P95 Time",
         dataIndex: "p95TimeMs",
         width: 120,
-        sorter: (a, b) => (a.p95TimeMs ?? 0) - (b.p95TimeMs ?? 0),
+        sorter: (a, b, sortOrder) => compareNullableNumber(a.p95TimeMs, b.p95TimeMs, sortOrder),
         render: (v: number | null) => formatDurationMs(v),
       },
       {
@@ -120,7 +129,7 @@ export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
   return (
     <Card
       size="small"
-      title="TopSQL (Top 50 by total_cpu_ms)"
+      title="TopSQL (Top 50, fetched by total_cpu_ms)"
       extra={
         <Space>
           <Input.Search
