@@ -22,13 +22,18 @@ export async function handleQuerySamples(
 ): Promise<void> {
   const c = await ensureDb();
   const where = buildWhere(datasetId, filters);
-  const orderExpr = orderBy === "cpuTimeMs" ? "cpu_time_ms" : "query_time_ms";
+  const orderExpr =
+    orderBy === "cpuTimeMs"
+      ? "cpu_time_ms"
+      : orderBy === "peakMemoryBytes"
+        ? "peak_memory_bytes"
+        : "query_time_ms";
   const safeLimit = clampInt(limit, 1, 500);
   const templateId = parseTemplateId(templateHash);
 
   const res = await queryWithParams(
     c,
-    `SELECT record_id, event_time_ms, query_id, user_name, db_name, client_ip, state, query_time_ms, cpu_time_ms, scan_bytes, scan_rows, return_rows, stmt_raw FROM audit_log_records WHERE ${where.whereSql} AND stripped_template_id = ? ORDER BY ${orderExpr} DESC NULLS LAST, event_time_ms DESC NULLS LAST, record_id DESC LIMIT ?;`,
+    `SELECT record_id, event_time_ms, query_id, user_name, db_name, client_ip, state, query_time_ms, cpu_time_ms, peak_memory_bytes, scan_bytes, scan_rows, return_rows, stmt_raw FROM audit_log_records WHERE ${where.whereSql} AND stripped_template_id = ? ORDER BY ${orderExpr} DESC NULLS LAST, event_time_ms DESC NULLS LAST, record_id DESC LIMIT ?;`,
     [...where.params, templateId, safeLimit]
   );
 
@@ -44,6 +49,7 @@ export async function handleQuerySamples(
       state: strOrNull(r.state),
       queryTimeMs: numOrNull(r.query_time_ms),
       cpuTimeMs: numOrNull(r.cpu_time_ms),
+      peakMemoryBytes: numOrNull(r.peak_memory_bytes),
       scanBytes: numOrNull(r.scan_bytes),
       scanRows: numOrNull(r.scan_rows),
       returnRows: numOrNull(r.return_rows),

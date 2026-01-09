@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { DbClient } from "../db/client/dbClient";
-import type { OverviewResult, QueryFilters, ShareRow, TopSqlRow } from "../db/client/protocol";
+import type {
+  OverviewResult,
+  QueryFilters,
+  ShareRankBy,
+  ShareRow,
+  TopSqlRow,
+} from "../db/client/protocol";
 import type { AsyncData } from "../utils/useAsync";
 import { useAsyncData } from "../utils/useAsync";
 
@@ -114,7 +120,7 @@ export function useDatasetQueries(params: {
   activeTab: TabKey;
   filters: QueryFilters;
   shareTopN: number;
-  shareRankBy: "totalCpuMs" | "totalTimeMs";
+  shareRankBy: ShareRankBy;
   setError: (value: string | null) => void;
 }): {
   overviewQuery: AsyncData<OverviewResult | null>;
