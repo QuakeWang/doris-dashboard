@@ -11,6 +11,10 @@ dist/
 .idea/
 .vscode/
 
+# Go build cache (sandbox-friendly)
+.gocache/
+.gomodcache/
+
 # DuckDB artifacts (optional future)
 *.duckdb
 *.duckdb.wal

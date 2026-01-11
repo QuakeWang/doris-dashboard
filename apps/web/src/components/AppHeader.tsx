@@ -1,4 +1,4 @@
-import { PlusOutlined } from "@ant-design/icons";
+import { LinkOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Layout, Space, Typography } from "antd";
 
 const { Header } = Layout;
@@ -9,11 +9,13 @@ export interface AppHeaderProps {
   importing: boolean;
   datasetId: string | null;
   isCoi: boolean;
+  dorisLabel: string;
   onNewDataset: () => void;
+  onOpenDoris: () => void;
 }
 
 export default function AppHeader(props: AppHeaderProps): JSX.Element {
-  const { ready, importing, datasetId, isCoi, onNewDataset } = props;
+  const { ready, importing, datasetId, isCoi, dorisLabel, onNewDataset, onOpenDoris } = props;
   return (
     <Header
       style={{
@@ -34,12 +36,16 @@ export default function AppHeader(props: AppHeaderProps): JSX.Element {
         </Title>
       </Space>
       <Space>
+        <Button icon={<LinkOutlined />} onClick={onOpenDoris}>
+          Doris
+        </Button>
         <Button icon={<PlusOutlined />} onClick={onNewDataset} disabled={!ready || importing}>
           New Dataset
         </Button>
         <Text style={{ color: isCoi ? "rgba(166, 227, 161, 0.9)" : "rgba(250, 179, 135, 0.9)" }}>
           COI: {isCoi ? "on" : "off"}
         </Text>
+        <Text style={{ color: "rgba(255,255,255,0.65)" }}>Doris: {dorisLabel}</Text>
         <Text style={{ color: "rgba(255,255,255,0.65)" }}>Dataset: {datasetId ?? "-"}</Text>
       </Space>
     </Header>

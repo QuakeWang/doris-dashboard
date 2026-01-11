@@ -1,5 +1,11 @@
 import { Alert, Button, Card, Layout, Space, Spin, Tabs, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import {
+  AgentClient,
+  type DorisConnectionInfo,
+  type DorisConnectionInput,
+  isDorisConnectionConfigured,
+} from "./agent/agentClient";
 import {
   type TabKey,
   toErrorMessage,
@@ -8,6 +14,8 @@ import {
   useTabState,
 } from "./app/hooks";
 import AppHeader from "./components/AppHeader";
+import DorisAuditLogImportModal from "./components/DorisAuditLogImportModal";
+import DorisConnectionModal from "./components/DorisConnectionModal";
 import FiltersCard from "./components/FiltersCard";
 import ImportCard from "./components/ImportCard";
 import OverviewTab from "./components/OverviewTab";
@@ -30,8 +38,38 @@ const DEFAULT_FILTERS: QueryFilters = { excludeInternal: true };
 const DUCKDB_WASM_OOB_ERROR =
   "DuckDB wasm crashed with 'memory access out of bounds'.\nThis is usually triggered by large inserts or a wasm runtime limitation.\nTry: reload the page and re-import; or switch to a Chromium-based browser.\nIf it persists, please share a small log snippet that reproduces the crash.";
 
+const DORIS_SESSION_KEY = "doris.connection.info.v1";
+
+function readDorisSessionInfo(): DorisConnectionInfo | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(DORIS_SESSION_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as any;
+    if (!v || typeof v.host !== "string") return null;
+    const port = Number(v.port ?? 0);
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+    const user = String(v.user ?? "");
+    if (!user) return null;
+    return { host: v.host, port, user };
+  } catch {
+    return null;
+  }
+}
+
+function writeDorisSessionInfo(info: DorisConnectionInfo | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!info) window.sessionStorage.removeItem(DORIS_SESSION_KEY);
+    else window.sessionStorage.setItem(DORIS_SESSION_KEY, JSON.stringify(info));
+  } catch {
+    // Ignore storage quota / access errors.
+  }
+}
+
 export default function App(): JSX.Element {
   const client = useMemo(() => new DbClient(), []);
+  const agent = useMemo(() => new AgentClient(), []);
   const isCoi = typeof window !== "undefined" && window.crossOriginIsolated === true;
 
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +90,17 @@ export default function App(): JSX.Element {
   const [shareRankBy, setShareRankBy] = useState<ShareRankBy>("totalCpuMs");
   const [shareChartType, setShareChartType] = useState<"bar" | "pie">("bar");
   const [shareTopN, setShareTopN] = useState(12);
+
+  const [dorisModalOpen, setDorisModalOpen] = useState(false);
+  const [dorisImportOpen, setDorisImportOpen] = useState(false);
+  const [dorisConn, setDorisConn] = useState<DorisConnectionInput | null>(() => {
+    const info = readDorisSessionInfo();
+    return info ? { ...info, password: "" } : null;
+  });
+  const openDorisModal = useCallback(() => setDorisModalOpen(true), []);
+  const closeDorisModal = useCallback(() => setDorisModalOpen(false), []);
+  const openDorisImport = useCallback(() => setDorisImportOpen(true), []);
+  const closeDorisImport = useCallback(() => setDorisImportOpen(false), []);
 
   const setFiltersBoth = (next: QueryFilters) => {
     setFiltersDraft(next);
@@ -148,6 +197,9 @@ export default function App(): JSX.Element {
       maxPeakMemBytes: row.maxPeakMemBytes,
     });
 
+  const dorisLabel = dorisConn ? `${dorisConn.user}@${dorisConn.host}:${dorisConn.port}` : "-";
+  const dorisConfigured = isDorisConnectionConfigured(dorisConn);
+
   return (
     <Layout style={{ minHeight: "100vh" }}>
       <AppHeader
@@ -155,7 +207,9 @@ export default function App(): JSX.Element {
         importing={importing}
         datasetId={datasetId}
         isCoi={isCoi}
+        dorisLabel={dorisLabel}
         onNewDataset={createNewDataset}
+        onOpenDoris={openDorisModal}
       />
 
       <Content style={{ padding: 24, maxWidth: 1360, width: "100%", margin: "0 auto" }}>
@@ -214,8 +268,11 @@ export default function App(): JSX.Element {
           datasetId={datasetId}
           importing={importing}
           importProgress={importProgress}
+          dorisConfigured={dorisConfigured}
+          onOpenDoris={openDorisModal}
+          onOpenDorisImport={openDorisImport}
           onImport={runImport}
-          onCancel={() => void client.cancelCurrentTask().catch(() => {})}
+          onCancel={() => void client.cancelCurrentTask().catch(() => undefined)}
         />
 
         <FiltersCard
@@ -305,6 +362,28 @@ export default function App(): JSX.Element {
         datasetId={datasetId}
         template={templateDrawer}
         filters={filters}
+      />
+
+      <DorisConnectionModal
+        open={dorisModalOpen}
+        onClose={closeDorisModal}
+        agent={agent}
+        current={dorisConn}
+        onSave={(conn, rememberInfo) => {
+          setDorisConn(conn);
+          writeDorisSessionInfo(
+            rememberInfo ? { host: conn.host, port: conn.port, user: conn.user } : null
+          );
+        }}
+      />
+      <DorisAuditLogImportModal
+        open={dorisImportOpen}
+        onClose={closeDorisImport}
+        agent={agent}
+        connection={dorisConn}
+        onOpenDoris={openDorisModal}
+        importing={importing}
+        onImport={runImport}
       />
     </Layout>
   );

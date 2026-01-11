@@ -287,9 +287,11 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
             {template.tableGuess && (
               <>
                 <div style={{ height: 12 }} />
-                <Text type="secondary">
-                  table_guess: <Text code>{template.tableGuess}</Text>
-                </Text>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary">
+                    table_guess: <Text code>{template.tableGuess}</Text>
+                  </Text>
+                </Space>
               </>
             )}
           </Card>
