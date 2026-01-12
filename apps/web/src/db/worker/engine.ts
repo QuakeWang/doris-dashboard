@@ -57,7 +57,7 @@ export async function ensureDb(): Promise<duckdb.AsyncDuckDBConnection> {
     try {
       const opfsName = getScratchOpfsName();
       await db.registerOPFSFileName(opfsName);
-      await db.dropFile(opfsName).catch(() => {});
+      await db.dropFile(opfsName).catch(() => undefined);
       await db.open({
         path: opfsName,
         accessMode: duckdb.DuckDBAccessMode.READ_WRITE,

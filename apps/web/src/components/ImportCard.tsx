@@ -10,12 +10,26 @@ export interface ImportCardProps {
   datasetId: string | null;
   importing: boolean;
   importProgress: ImportProgress | null;
+  dorisConfigured: boolean;
+  onOpenDoris: () => void;
+  onOpenDorisImport: () => void;
   onImport: (file: File) => void;
   onCancel: () => void;
 }
 
 export default function ImportCard(props: ImportCardProps): JSX.Element {
-  const { ready, datasetId, importing, importProgress, onImport, onCancel } = props;
+  const {
+    ready,
+    datasetId,
+    importing,
+    importProgress,
+    dorisConfigured,
+    onOpenDoris,
+    onOpenDorisImport,
+    onImport,
+    onCancel,
+  } = props;
+  const canImport = ready && !!datasetId && !importing;
   return (
     <Card
       style={{ marginBottom: 12 }}
@@ -23,6 +37,14 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
       size="small"
       extra={
         <Space>
+          {!importing && (
+            <Button
+              onClick={() => (dorisConfigured ? onOpenDorisImport() : onOpenDoris())}
+              disabled={!canImport}
+            >
+              Import from Doris
+            </Button>
+          )}
           {importing && (
             <Button danger onClick={onCancel} disabled={!ready}>
               Cancel
@@ -37,7 +59,7 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
             multiple={false}
             maxCount={1}
             showUploadList={false}
-            disabled={!ready || !datasetId || importing}
+            disabled={!canImport}
             beforeUpload={(file) => {
               onImport(file as File);
               return false;
@@ -48,7 +70,8 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
             </p>
             <p className="ant-upload-text">Click or drag file to import</p>
             <p className="ant-upload-hint">
-              No data is uploaded. Everything runs locally in your browser.
+              Supports <Text code>fe.audit.log</Text> and <Text code>audit_log</Text> OUTFILE{" "}
+              CSV/TSV. No data is uploaded. Everything runs locally in your browser.
             </p>
           </Upload.Dragger>
         </Col>
