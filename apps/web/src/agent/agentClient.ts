@@ -2,6 +2,7 @@ export type DorisConnectionInfo = {
   host: string;
   port: number;
   user: string;
+  database?: string;
 };
 
 export type DorisConnectionInput = DorisConnectionInfo & {
@@ -19,6 +20,11 @@ function parseErrMessage(text: string): string | null {
   return x && x.ok === false && typeof x?.error?.message === "string"
     ? (x.error.message as string)
     : null;
+}
+
+async function toResponseError(res: Response): Promise<Error> {
+  const text = await res.text();
+  return new Error(parseErrMessage(text) ?? `Request failed (status=${res.status})`);
 }
 
 export class AgentClient {
@@ -62,28 +68,22 @@ export class AgentClient {
 
   private async postBlob(path: string, payload: unknown, signal?: AbortSignal): Promise<Blob> {
     const res = await this.post(path, payload, signal);
-    if (res.ok) {
-      try {
-        return await res.blob();
-      } catch {
-        throw new Error("Export interrupted. Please retry.");
-      }
+    if (!res.ok) throw await toResponseError(res);
+    try {
+      return await res.blob();
+    } catch {
+      throw new Error("Export interrupted. Please retry.");
     }
-    const text = await res.text();
-    throw new Error(parseErrMessage(text) ?? `Request failed (status=${res.status})`);
   }
 
   private async postJson<T>(path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.post(path, payload, signal);
-    if (res.ok) {
-      try {
-        return (await res.json()) as T;
-      } catch {
-        throw new Error("Request interrupted. Please retry.");
-      }
+    if (!res.ok) throw await toResponseError(res);
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new Error("Request interrupted. Please retry.");
     }
-    const text = await res.text();
-    throw new Error(parseErrMessage(text) ?? `Request failed (status=${res.status})`);
   }
 
   async testDorisConnection(
@@ -98,6 +98,18 @@ export class AgentClient {
     return res.version;
   }
 
+  async listDorisDatabases(
+    params: { connection: DorisConnectionInput },
+    signal?: AbortSignal
+  ): Promise<string[]> {
+    const res = await this.postJson<{ databases: string[] }>(
+      "/api/v1/doris/databases",
+      params,
+      signal
+    );
+    return res.databases;
+  }
+
   async exportAuditLogOutfileTsv(
     params: {
       connection: DorisConnectionInput;
@@ -107,6 +119,18 @@ export class AgentClient {
     signal?: AbortSignal
   ): Promise<Blob> {
     return await this.postBlob("/api/v1/doris/audit-log/export", params, signal);
+  }
+
+  async explainTree(
+    params: { connection: DorisConnectionInput; sql: string },
+    signal?: AbortSignal
+  ): Promise<string> {
+    const res = await this.postJson<{ rawText: string }>(
+      "/api/v1/doris/explain/tree",
+      params,
+      signal
+    );
+    return res.rawText;
   }
 }
 

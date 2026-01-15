@@ -1,5 +1,5 @@
 import * as echarts from "echarts";
-import React, { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { CATPPUCCIN_ECHARTS_THEME, CATPPUCCIN_ECHARTS_THEME_NAME } from "../theme/echarts";
 
 let themeRegistered = false;

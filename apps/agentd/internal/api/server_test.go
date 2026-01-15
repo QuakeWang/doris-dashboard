@@ -24,8 +24,12 @@ const (
 	localRemoteAddr = "127.0.0.1:12345"
 	exportPath      = "/api/v1/doris/audit-log/export"
 	connTestPath    = "/api/v1/doris/connection/test"
+	databasesPath   = "/api/v1/doris/databases"
+	explainTreePath = "/api/v1/doris/explain/tree"
 	connTestBody    = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password"}}`
+	connWithDBBody  = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password","database":"tpch"}}`
 	exportBody      = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password"},"lookbackSeconds":60,"limit":10}`
+	explainTreeBody = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password"},"sql":"SELECT 1"}`
 )
 
 func newLocalRequest(method, target string, body io.Reader) *http.Request {
@@ -91,9 +95,13 @@ func TestServerErrorResponses(t *testing.T) {
 			wantErrContains: "boom",
 		},
 		{
-			name:            "reject non-loopback remote addr",
-			handler:         NewServer(noOpExporter, 0),
-			req:             func() *http.Request { r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil); r.RemoteAddr = "192.0.2.1:12345"; return r }(),
+			name:    "reject non-loopback remote addr",
+			handler: NewServer(noOpExporter, 0),
+			req: func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+				r.RemoteAddr = "192.0.2.1:12345"
+				return r
+			}(),
 			wantStatus:      http.StatusForbidden,
 			wantErrContains: "loopback only",
 		},
@@ -118,6 +126,13 @@ func TestServerErrorResponses(t *testing.T) {
 			}(),
 			wantStatus:      http.StatusBadRequest,
 			wantErrContains: "Content-Type must be application/json",
+		},
+		{
+			name:            "explain missing sql",
+			handler:         newServer(noOpExporter, 0, nil, func(context.Context, doris.ConnConfig, string) (string, error) { return "", nil }, nil),
+			req:             newLocalJSONRequest(http.MethodPost, explainTreePath, connTestBody),
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "sql is required",
 		},
 	}
 
@@ -181,5 +196,58 @@ func TestExportAuditLogCallsExporter(t *testing.T) {
 	}
 	if gotLookback != 60 || gotLimit != 10 {
 		t.Fatalf("unexpected args: lookback=%d limit=%d", gotLookback, gotLimit)
+	}
+}
+
+func TestExplainTreeCallsRunner(t *testing.T) {
+	t.Parallel()
+
+	var gotCfg doris.ConnConfig
+	var gotSQL string
+	h := newServer(nil, 0, nil, func(ctx context.Context, cfg doris.ConnConfig, sql string) (string, error) {
+		gotCfg = cfg
+		gotSQL = sql
+		return "[00]:[0: ResultSink]||[Fragment: 0]||", nil
+	}, nil)
+
+	r := newLocalJSONRequest(http.MethodPost, explainTreePath, explainTreeBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", w.Code)
+	}
+	if gotCfg.Host != "127.0.0.1" || gotCfg.Port != 19030 || gotCfg.User != "test_user" || gotCfg.Password != "test_password" {
+		t.Fatalf("unexpected cfg: %+v", gotCfg)
+	}
+	if gotSQL != "SELECT 1" {
+		t.Fatalf("unexpected sql: %q", gotSQL)
+	}
+	if !strings.Contains(w.Body.String(), `"rawText":"[00]:[0: ResultSink]||[Fragment: 0]||"`) {
+		t.Fatalf("unexpected response body: %q", w.Body.String())
+	}
+}
+
+func TestListDatabasesCallsRunner(t *testing.T) {
+	t.Parallel()
+
+	var gotCfg doris.ConnConfig
+	h := newServer(nil, 0, nil, nil, func(ctx context.Context, cfg doris.ConnConfig) ([]string, error) {
+		gotCfg = cfg
+		return []string{"db1", "db2"}, nil
+	})
+
+	r := newLocalJSONRequest(http.MethodPost, databasesPath, connWithDBBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", w.Code)
+	}
+	if gotCfg.Database != "tpch" {
+		t.Fatalf("unexpected database: %q", gotCfg.Database)
+	}
+	if !strings.Contains(w.Body.String(), `"databases":["db1","db2"]`) {
+		t.Fatalf("unexpected response body: %q", w.Body.String())
 	}
 }

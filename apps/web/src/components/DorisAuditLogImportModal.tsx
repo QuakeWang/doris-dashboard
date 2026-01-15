@@ -115,11 +115,7 @@ export default function DorisAuditLogImportModal(
           <Button onClick={onClose} disabled={loading}>
             Close
           </Button>
-          {loading && (
-            <Button onClick={cancelExport} disabled={!loading}>
-              Cancel
-            </Button>
-          )}
+          {loading && <Button onClick={cancelExport}>Cancel</Button>}
           <Button type="primary" loading={loading} disabled={!canSubmit} onClick={doImport}>
             Import
           </Button>

@@ -15,9 +15,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@duckdb/duckdb-wasm": "^1.29.0",
     "@ant-design/icons": "^5.6.1",
+    "@duckdb/duckdb-wasm": "^1.29.0",
     "antd": "^5.27.1",
+    "d3": "^7.9.0",
+    "d3-flextree": "^2.1.2",
     "dayjs": "^1.11.13",
     "echarts": "^5.6.0",
     "react": "^18.3.1",
@@ -25,6 +27,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@types/d3": "^7.4.3",
+    "@types/d3-flextree": "^2.1.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

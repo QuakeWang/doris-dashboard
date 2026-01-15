@@ -17,6 +17,7 @@ type ConnConfig struct {
 	Port     int
 	User     string
 	Password string
+	Database string
 
 	ConnectTimeout time.Duration
 	ReadTimeout    time.Duration
@@ -39,6 +40,9 @@ func OpenDB(cfg ConnConfig) (*sql.DB, error) {
 	c.Addr = addr
 	c.User = cfg.User
 	c.Passwd = cfg.Password
+	if database := strings.TrimSpace(cfg.Database); database != "" {
+		c.DBName = database
+	}
 	connectTimeout := cfg.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = 5 * time.Second

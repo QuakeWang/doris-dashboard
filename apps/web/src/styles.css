@@ -148,3 +148,277 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.dd-explain-outline {
+  max-height: 520px;
+  overflow: auto;
+  padding: 0;
+  border-radius: 12px;
+  background: rgba(49, 50, 68, 0.2);
+  border: 1px solid rgba(88, 91, 112, 0.4);
+}
+
+.dd-outline-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 14px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(88, 91, 112, 0.38);
+  border-left: 3px solid var(--dd-row-accent, rgba(88, 91, 112, 0.55));
+  cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease, border-color 120ms ease;
+}
+
+.dd-outline-row:hover {
+  background: rgba(69, 71, 90, 0.25);
+}
+
+.dd-outline-row-selected {
+  background: rgba(203, 166, 247, 0.12);
+}
+
+.dd-outline-plan {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dd-outline-plan-header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.dd-outline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dd-outline-icon-placeholder {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+}
+
+.dd-outline-open-btn {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dd-outline-open-btn:focus-visible {
+  outline: 2px solid rgba(137, 180, 250, 0.65);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.dd-outline-open-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.dd-outline-detail-toggle {
+  opacity: 0.7;
+}
+
+.dd-outline-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dd-outline-tag {
+  margin-inline-end: 0 !important;
+  opacity: 0.9;
+}
+
+.dd-outline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--mocha-subtext0);
+  font-size: 12px;
+}
+
+.dd-outline-hint {
+  margin-top: 2px;
+}
+
+.dd-outline-param {
+  margin-top: 2px;
+  color: var(--mocha-subtext0);
+  font-size: 12px;
+}
+
+.dd-outline-metric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.dd-outline-metric-header,
+.dd-outline-metric-label {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.dd-outline-metric-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(88, 91, 112, 0.35);
+  overflow: hidden;
+}
+
+.dd-outline-metric-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(137, 180, 250, 0.85);
+}
+
+.dd-explain-diagram {
+  position: relative;
+  height: 520px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(49, 50, 68, 0.2);
+  border: 1px solid rgba(88, 91, 112, 0.4);
+}
+
+.dd-diagram-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dd-diagram-link {
+  fill: none;
+  stroke: rgba(88, 91, 112, 0.45);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+}
+
+.dd-diagram-link-selected {
+  stroke: rgba(203, 166, 247, 0.9);
+  stroke-width: 2.5px;
+}
+
+.dd-diagram-card {
+  width: 300px;
+  height: 88px;
+  border-radius: 10px;
+  background: rgba(49, 50, 68, 0.52);
+  border: 1px solid rgba(88, 91, 112, 0.55);
+  border-left-width: 4px;
+  border-left-color: var(--dd-diagram-accent, rgba(88, 91, 112, 0.65));
+  box-sizing: border-box;
+  box-shadow: 0 2px 10px rgba(17, 17, 27, 0.25);
+  transition: border-color 120ms ease, background 120ms ease, opacity 120ms ease, box-shadow 120ms
+    ease;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dd-diagram-card:hover {
+  background: rgba(49, 50, 68, 0.65);
+  box-shadow: 0 6px 18px rgba(17, 17, 27, 0.35);
+}
+
+.dd-diagram-card-selected {
+  border-color: rgba(203, 166, 247, 0.95);
+  box-shadow: 0 0 0 1px rgba(203, 166, 247, 0.2), 0 10px 26px rgba(17, 17, 27, 0.35);
+}
+
+.dd-diagram-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 8px 6px 10px;
+}
+
+.dd-diagram-card-open {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dd-diagram-card-open:focus-visible {
+  outline: 2px solid rgba(137, 180, 250, 0.65);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.dd-diagram-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dd-diagram-tag {
+  margin-inline-end: 0 !important;
+  opacity: 0.9;
+}
+
+.dd-diagram-collapse-btn {
+  opacity: 0.55;
+}
+
+.dd-diagram-card:hover .dd-diagram-collapse-btn {
+  opacity: 1;
+}
+
+.dd-diagram-metric {
+  margin: 0 10px 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(88, 91, 112, 0.35);
+  overflow: hidden;
+}
+
+.dd-diagram-metric-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(137, 180, 250, 0.85);
+}
+
+.dd-diagram-collapsed-hint {
+  padding: 0 10px 8px;
+}
+
+.dd-diagram-controls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(24, 24, 37, 0.65);
+  border: 1px solid rgba(88, 91, 112, 0.45);
+  backdrop-filter: blur(10px);
+}

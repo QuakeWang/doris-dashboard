@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 )
@@ -99,14 +100,7 @@ func StreamAuditLogOutfileTSVLookback(
 	}
 	for _, c := range checks {
 		got := strings.ToLower(outCols[c.idx])
-		ok := false
-		for _, want := range c.names {
-			if got == want {
-				ok = true
-				break
-			}
-		}
-		if ok {
+		if slices.Contains(c.names, got) {
 			continue
 		}
 		return fmt.Errorf(

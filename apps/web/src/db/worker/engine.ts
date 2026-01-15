@@ -43,46 +43,47 @@ function getScratchOpfsName(): string {
 
 export async function ensureDb(): Promise<duckdb.AsyncDuckDBConnection> {
   if (conn) return conn;
-  if (connPromise) return await connPromise;
-  connPromise = (async (): Promise<duckdb.AsyncDuckDBConnection> => {
-    const bundle = await duckdb.selectBundle(DUCKDB_BUNDLES);
-    const engineWorker = new Worker(bundle.mainWorker!);
-    const logger = new duckdb.ConsoleLogger();
-    db = new duckdb.AsyncDuckDB(logger, engineWorker);
-    await db.instantiate(bundle.mainModule!, bundle.pthreadWorker);
+  if (!connPromise) {
+    connPromise = (async (): Promise<duckdb.AsyncDuckDBConnection> => {
+      const bundle = await duckdb.selectBundle(DUCKDB_BUNDLES);
+      const engineWorker = new Worker(bundle.mainWorker!);
+      const logger = new duckdb.ConsoleLogger();
+      db = new duckdb.AsyncDuckDB(logger, engineWorker);
+      await db.instantiate(bundle.mainModule!, bundle.pthreadWorker);
 
-    const hc = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4;
-    const threads = Math.max(1, Math.min(8, Number.isFinite(hc) ? hc : 4));
+      const hc = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 4;
+      const threads = Math.max(1, Math.min(8, Number.isFinite(hc) ? hc : 4));
 
-    try {
-      const opfsName = getScratchOpfsName();
-      await db.registerOPFSFileName(opfsName);
-      await db.dropFile(opfsName).catch(() => undefined);
-      await db.open({
-        path: opfsName,
-        accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
-        maximumThreads: threads,
-      });
-      log(`DuckDB storage: OPFS scratch (${opfsName})`);
-    } catch (e) {
-      log(`DuckDB storage fallback: in-memory (${e instanceof Error ? e.message : String(e)})`);
-      await db.open({ maximumThreads: threads });
-    }
+      try {
+        const opfsName = getScratchOpfsName();
+        await db.registerOPFSFileName(opfsName);
+        await db.dropFile(opfsName).catch(() => undefined);
+        await db.open({
+          path: opfsName,
+          accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
+          maximumThreads: threads,
+        });
+        log(`DuckDB storage: OPFS scratch (${opfsName})`);
+      } catch (e) {
+        log(`DuckDB storage fallback: in-memory (${e instanceof Error ? e.message : String(e)})`);
+        await db.open({ maximumThreads: threads });
+      }
 
-    conn = await db.connect();
-    await createSchema(conn);
-    try {
-      await conn.query(`PRAGMA threads=${threads}`);
-      log(`DuckDB threads=${threads}`);
-    } catch (e) {
-      log(`PRAGMA threads skipped: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    return conn;
-  })();
+      conn = await db.connect();
+      await createSchema(conn);
+      try {
+        await conn.query(`PRAGMA threads=${threads}`);
+        log(`DuckDB threads=${threads}`);
+      } catch (e) {
+        log(`PRAGMA threads skipped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return conn;
+    })();
+  }
+  const promise = connPromise!;
 
   try {
-    const c = await connPromise;
-    return c;
+    return await promise;
   } catch (e) {
     connPromise = null;
     throw e;
