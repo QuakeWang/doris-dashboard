@@ -51,6 +51,7 @@ export interface TemplateDetailDrawerProps {
   datasetId: string | null;
   template: TemplateRef | null;
   filters: QueryFilters;
+  onExplainSql?: (sql: string) => void;
 }
 
 type SeriesMetric = "execCount" | "totalCpuMs" | "totalTimeMs";
@@ -133,7 +134,7 @@ const DIM_COLUMNS: ColumnsType<DimensionTopRow> = [
 ];
 
 export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): JSX.Element {
-  const { open, onClose, client, datasetId, template, filters } = props;
+  const { open, onClose, client, datasetId, template, filters, onExplainSql } = props;
 
   const [bucketSeconds, setBucketSeconds] = useState(300);
   const [seriesMetric, setSeriesMetric] = useState<SeriesMetric>("totalCpuMs");
@@ -232,6 +233,37 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
     : "Template Detail";
 
   const samplesTitleOrderLabel = SAMPLES_ORDER_LABEL[samplesOrderBy];
+
+  const sampleColumns: ColumnsType<QuerySampleRow> = useMemo(
+    () => [
+      ...SAMPLE_COLUMNS,
+      {
+        title: "Actions",
+        key: "actions",
+        width: 120,
+        fixed: "right",
+        render: (_: unknown, r: QuerySampleRow) => (
+          <Space size={4}>
+            <CopyIconButton text={r.stmtRaw ?? ""} tooltip="Copy SQL" ariaLabel="Copy SQL" />
+            <Button
+              type="link"
+              size="small"
+              className="dd-link-btn"
+              disabled={!onExplainSql || !r.stmtRaw}
+              onClick={() => {
+                if (!r.stmtRaw) return;
+                onExplainSql?.(r.stmtRaw);
+                onClose();
+              }}
+            >
+              Explain
+            </Button>
+          </Space>
+        ),
+      },
+    ],
+    [onClose, onExplainSql]
+  );
 
   return (
     <Drawer title={drawerTitle} width={920} onClose={onClose} open={open}>
@@ -388,9 +420,9 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                         rowKey={(r) => String(r.recordId)}
                         size="small"
                         pagination={{ pageSize: 10 }}
-                        columns={SAMPLE_COLUMNS}
+                        columns={sampleColumns}
                         dataSource={samples}
-                        scroll={{ x: 1200 }}
+                        scroll={{ x: 1400 }}
                       />
                     </AsyncContent>
                   </Card>

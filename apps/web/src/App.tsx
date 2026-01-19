@@ -16,6 +16,7 @@ import {
 import AppHeader from "./components/AppHeader";
 import DorisAuditLogImportModal from "./components/DorisAuditLogImportModal";
 import DorisConnectionModal from "./components/DorisConnectionModal";
+import ExplainTab from "./components/ExplainTab";
 import FiltersCard from "./components/FiltersCard";
 import ImportCard from "./components/ImportCard";
 import OverviewTab from "./components/OverviewTab";
@@ -85,6 +86,8 @@ export default function App(): JSX.Element {
 
   const [topSqlSearch, setTopSqlSearch] = useState("");
   const [templateDrawer, setTemplateDrawer] = useState<TemplateRef | null>(null);
+
+  const [explainSql, setExplainSql] = useState("");
 
   const [shareMetric, setShareMetric] = useState<"cpu" | "time" | "memory">("cpu");
   const [shareRankBy, setShareRankBy] = useState<ShareRankBy>("totalCpuMs");
@@ -200,6 +203,14 @@ export default function App(): JSX.Element {
   const dorisLabel = dorisConn ? `${dorisConn.user}@${dorisConn.host}:${dorisConn.port}` : "-";
   const dorisConfigured = isDorisConnectionConfigured(dorisConn);
 
+  const openExplainWithSql = useCallback(
+    (sqlText: string) => {
+      setExplainSql(sqlText);
+      setTab("explain");
+    },
+    [setTab]
+  );
+
   return (
     <Layout style={{ minHeight: "100vh" }}>
       <AppHeader
@@ -263,27 +274,31 @@ export default function App(): JSX.Element {
           />
         )}
 
-        <ImportCard
-          ready={ready}
-          datasetId={datasetId}
-          importing={importing}
-          importProgress={importProgress}
-          dorisConfigured={dorisConfigured}
-          onOpenDoris={openDorisModal}
-          onOpenDorisImport={openDorisImport}
-          onImport={runImport}
-          onCancel={() => void client.cancelCurrentTask().catch(() => undefined)}
-        />
+        {activeTab !== "explain" ? (
+          <>
+            <ImportCard
+              ready={ready}
+              datasetId={datasetId}
+              importing={importing}
+              importProgress={importProgress}
+              dorisConfigured={dorisConfigured}
+              onOpenDoris={openDorisModal}
+              onOpenDorisImport={openDorisImport}
+              onImport={runImport}
+              onCancel={() => void client.cancelCurrentTask().catch(() => undefined)}
+            />
 
-        <FiltersCard
-          datasetId={datasetId}
-          importing={importing}
-          overview={overviewQuery.data}
-          draft={filtersDraft}
-          onPatchDraft={patchFiltersDraft}
-          onApply={() => setFilters(filtersDraft)}
-          onSetBoth={setFiltersBoth}
-        />
+            <FiltersCard
+              datasetId={datasetId}
+              importing={importing}
+              overview={overviewQuery.data}
+              draft={filtersDraft}
+              onPatchDraft={patchFiltersDraft}
+              onApply={() => setFilters(filtersDraft)}
+              onSetBoth={setFiltersBoth}
+            />
+          </>
+        ) : null}
 
         <Tabs
           centered
@@ -351,6 +366,20 @@ export default function App(): JSX.Element {
                 />
               ),
             },
+            {
+              key: "explain",
+              label: "Explain",
+              children: (
+                <ExplainTab
+                  agent={agent}
+                  dorisConn={dorisConn}
+                  dorisConfigured={dorisConfigured}
+                  onOpenDoris={openDorisModal}
+                  sql={explainSql}
+                  onChangeSql={setExplainSql}
+                />
+              ),
+            },
           ]}
         />
       </Content>
@@ -362,6 +391,7 @@ export default function App(): JSX.Element {
         datasetId={datasetId}
         template={templateDrawer}
         filters={filters}
+        onExplainSql={openExplainWithSql}
       />
 
       <DorisConnectionModal

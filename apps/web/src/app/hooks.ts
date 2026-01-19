@@ -10,7 +10,7 @@ import type {
 import type { AsyncData } from "../utils/useAsync";
 import { useAsyncData } from "../utils/useAsync";
 
-export type TabKey = "overview" | "topSql" | "share";
+export type TabKey = "overview" | "topSql" | "share" | "explain";
 
 export function toErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -18,7 +18,9 @@ export function toErrorMessage(e: unknown): string {
 
 function parseTabFromSearch(search: string): TabKey | null {
   const tab = new URLSearchParams(search).get("tab");
-  return tab === "overview" || tab === "topSql" || tab === "share" ? tab : null;
+  return tab === "overview" || tab === "topSql" || tab === "share" || tab === "explain"
+    ? tab
+    : null;
 }
 
 function pushTabToUrl(tab: TabKey): void {
