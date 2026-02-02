@@ -129,4 +129,39 @@ describe("parseAuditLogOutfileLine", () => {
     expect(r.sqlTemplateStripped).toBe("select * from test_table where a = ? and b = ?");
     expect(r.tableGuess).toBe("test_db.test_table");
   });
+
+  it("rejects truncated rows when header mapping is active", () => {
+    const header = [
+      "query_id",
+      "time",
+      "client_ip",
+      "user",
+      "catalog",
+      "db",
+      "state",
+      "error_code",
+      "error_message",
+      "query_time",
+      "scan_bytes",
+      "scan_rows",
+      "return_rows",
+      "stmt_id",
+      "stmt_type",
+      "is_query",
+      "frontend_ip",
+      "cpu_time_ms",
+      "sql_hash",
+      "sql_digest",
+      "peak_memory_bytes",
+      "workload_group",
+      "stmt",
+    ];
+    const headerRes = parseAuditLogOutfileLine(header.join("\t"), "\t");
+    expect(headerRes.kind).toBe("header");
+    if (headerRes.kind !== "header") throw new Error("expected header");
+
+    const truncated = new Array(header.length - 1).fill("x").join("\t");
+    const res = parseAuditLogOutfileLine(truncated, "\t", headerRes.header);
+    expect(res.kind).toBe("invalid");
+  });
 });

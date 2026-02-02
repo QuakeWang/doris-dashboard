@@ -1,7 +1,7 @@
 import * as arrow from "apache-arrow";
 import {
   type AuditLogOutfileDelimiter,
-  type OutfileColumnIndex,
+  type OutfileHeader,
   detectOutfileDelimiter,
   parseAuditLogOutfileLine,
 } from "../../import/auditLogOutfileCsv";
@@ -320,7 +320,7 @@ export async function handleImportAuditLog(
 
     if (input.format === "auditLogOutfileCsv") {
       const delimiter = input.outfileDelimiter ?? "\t";
-      let outfileHeader: OutfileColumnIndex | null = null;
+      let outfileHeader: OutfileHeader | null = null;
       for await (const line of iterateLines(file, { signal, onProgress })) {
         if (signal.aborted) throw new DOMException("Aborted", "AbortError");
         if (!line.trim()) continue;

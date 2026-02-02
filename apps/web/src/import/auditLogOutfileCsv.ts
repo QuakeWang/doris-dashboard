@@ -29,6 +29,10 @@ export type OutfileColumnKey =
   | "stmt_raw";
 
 export type OutfileColumnIndex = Partial<Record<OutfileColumnKey, number>>;
+export type OutfileHeader = {
+  index: OutfileColumnIndex;
+  maxIndex: number;
+};
 
 const OUTFILE_HEADER_ALIASES: Record<string, OutfileColumnKey> = {
   query_id: "query_id",
@@ -135,7 +139,7 @@ function normalizeHeaderKey(v: string): OutfileColumnKey | null {
   return OUTFILE_HEADER_ALIASES[key] ?? null;
 }
 
-function tryParseOutfileHeader(fields: readonly string[]): OutfileColumnIndex | null {
+function tryParseOutfileHeader(fields: readonly string[]): OutfileHeader | null {
   if (fields.length < 3) return null;
   const index: OutfileColumnIndex = {};
   for (let i = 0; i < fields.length; i++) {
@@ -146,28 +150,32 @@ function tryParseOutfileHeader(fields: readonly string[]): OutfileColumnIndex | 
   for (const key of OUTFILE_HEADER_REQUIRED) {
     if (index[key] == null) return null;
   }
-  return index;
+  let maxIndex = -1;
+  for (const idx of Object.values(index)) {
+    if (idx != null && idx > maxIndex) maxIndex = idx;
+  }
+  return { index, maxIndex };
 }
 
 function pickField(
   fields: readonly string[],
-  header: OutfileColumnIndex,
+  header: OutfileHeader,
   key: OutfileColumnKey
 ): string | undefined {
-  const idx = header[key];
+  const idx = header.index[key];
   if (idx == null || idx < 0 || idx >= fields.length) return undefined;
   return fields[idx];
 }
 
 export type AuditLogOutfileLineResult =
-  | { kind: "header"; header: OutfileColumnIndex }
+  | { kind: "header"; header: OutfileHeader }
   | { kind: "invalid" }
   | { kind: "record"; record: ParsedAuditLogRecord };
 
 export function parseAuditLogOutfileLine(
   line: string,
   delimiter: AuditLogOutfileDelimiter,
-  header?: OutfileColumnIndex | null
+  header?: OutfileHeader | null
 ): AuditLogOutfileLineResult {
   const fields = splitDelimitedLine(line, delimiter);
   if (!fields) return { kind: "invalid" };
@@ -175,6 +183,8 @@ export function parseAuditLogOutfileLine(
     const parsedHeader = tryParseOutfileHeader(fields);
     if (parsedHeader) return { kind: "header", header: parsedHeader };
     if (fields.length !== AUDIT_LOG_OUTFILE_COLS) return { kind: "invalid" };
+  } else if (header.maxIndex >= 0 && fields.length <= header.maxIndex) {
+    return { kind: "invalid" };
   }
 
   const getField = header
