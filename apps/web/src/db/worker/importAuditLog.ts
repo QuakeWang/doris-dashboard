@@ -1,8 +1,8 @@
 import * as arrow from "apache-arrow";
 import {
   type AuditLogOutfileDelimiter,
-  detectOutfileDelimiter,
   type OutfileColumnIndex,
+  detectOutfileDelimiter,
   parseAuditLogOutfileLine,
 } from "../../import/auditLogOutfileCsv";
 import { parseAuditLogRecordBlock } from "../../import/auditLogParser";
