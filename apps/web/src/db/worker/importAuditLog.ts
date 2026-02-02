@@ -2,6 +2,7 @@ import * as arrow from "apache-arrow";
 import {
   type AuditLogOutfileDelimiter,
   detectOutfileDelimiter,
+  type OutfileColumnIndex,
   parseAuditLogOutfileLine,
 } from "../../import/auditLogOutfileCsv";
 import { parseAuditLogRecordBlock } from "../../import/auditLogParser";
@@ -319,11 +320,15 @@ export async function handleImportAuditLog(
 
     if (input.format === "auditLogOutfileCsv") {
       const delimiter = input.outfileDelimiter ?? "\t";
+      let outfileHeader: OutfileColumnIndex | null = null;
       for await (const line of iterateLines(file, { signal, onProgress })) {
         if (signal.aborted) throw new DOMException("Aborted", "AbortError");
         if (!line.trim()) continue;
-        const res = parseAuditLogOutfileLine(line, delimiter);
-        if (res.kind === "header") continue;
+        const res = parseAuditLogOutfileLine(line, delimiter, outfileHeader);
+        if (res.kind === "header") {
+          outfileHeader = res.header;
+          continue;
+        }
         recordsParsed++;
         if (res.kind === "invalid") {
           badRecords++;
