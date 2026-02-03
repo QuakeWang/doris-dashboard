@@ -6,13 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"time"
 )
 
 const (
-	auditLogOutfileCols  = 29
 	auditLogMaxLimit     = 200_000
 	auditLogDefaultLimit = 50_000
 
@@ -67,49 +65,10 @@ func StreamAuditLogOutfileTSVLookback(
 	if err != nil {
 		return err
 	}
-	if len(cols) < auditLogOutfileCols {
-		return fmt.Errorf(
-			"unexpected audit_log columns: %d (expected >= %d)",
-			len(cols),
-			auditLogOutfileCols,
-		)
+	if len(cols) == 0 {
+		return errors.New("unexpected audit_log columns: empty")
 	}
-	outCols := cols[:auditLogOutfileCols]
-	checks := []struct {
-		idx   int
-		names []string
-	}{
-		{0, []string{"query_id"}},
-		{1, []string{"time"}},
-		{2, []string{"client_ip"}},
-		{3, []string{"user", "user_name"}},
-		{5, []string{"db", "db_name"}},
-		{6, []string{"state"}},
-		{7, []string{"error_code"}},
-		{8, []string{"error_message"}},
-		{9, []string{"time(ms)", "time_ms", "query_time", "query_time_ms"}},
-		{10, []string{"scan_bytes"}},
-		{11, []string{"scan_rows"}},
-		{12, []string{"return_rows"}},
-		{21, []string{"fe_ip", "frontend_ip"}},
-		{22, []string{"cpu_time_ms"}},
-		{25, []string{"peak_memory_bytes"}},
-		{26, []string{"workload_group"}},
-		{27, []string{"cloud_cluster_name", "compute_group_name", "compute_group"}},
-		{28, []string{"stmt"}},
-	}
-	for _, c := range checks {
-		got := strings.ToLower(outCols[c.idx])
-		if slices.Contains(c.names, got) {
-			continue
-		}
-		return fmt.Errorf(
-			"unexpected audit_log column[%d]: %q (expected %s)",
-			c.idx,
-			outCols[c.idx],
-			strings.Join(c.names, " or "),
-		)
-	}
+	outCols := cols
 
 	raw := make([]any, len(cols))
 	ptrs := make([]any, len(cols))
@@ -129,7 +88,7 @@ func StreamAuditLogOutfileTSVLookback(
 		return err
 	}
 
-	row := make([]string, auditLogOutfileCols)
+	row := make([]string, len(outCols))
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -137,7 +96,7 @@ func StreamAuditLogOutfileTSVLookback(
 		if err := rows.Scan(ptrs...); err != nil {
 			return err
 		}
-		for i := 0; i < auditLogOutfileCols; i++ {
+		for i := 0; i < len(outCols); i++ {
 			row[i] = formatOutfileField(raw[i])
 		}
 		if _, err := bw.WriteString(strings.Join(row, "\t") + "\n"); err != nil {

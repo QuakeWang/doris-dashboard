@@ -8,6 +8,64 @@ export const AUDIT_LOG_OUTFILE_COLS = 29;
 
 export type AuditLogOutfileDelimiter = "\t" | ",";
 
+export type OutfileColumnKey =
+  | "query_id"
+  | "time"
+  | "client_ip"
+  | "user_name"
+  | "db_name"
+  | "state"
+  | "error_code"
+  | "error_message"
+  | "query_time_ms"
+  | "scan_bytes"
+  | "scan_rows"
+  | "return_rows"
+  | "fe_ip"
+  | "cpu_time_ms"
+  | "peak_memory_bytes"
+  | "workload_group"
+  | "cloud_cluster_name"
+  | "stmt_raw";
+
+export type OutfileColumnIndex = Partial<Record<OutfileColumnKey, number>>;
+export type OutfileHeader = {
+  index: OutfileColumnIndex;
+  maxIndex: number;
+};
+
+const OUTFILE_HEADER_ALIASES: Record<string, OutfileColumnKey> = {
+  query_id: "query_id",
+  time: "time",
+  client_ip: "client_ip",
+  user: "user_name",
+  user_name: "user_name",
+  db: "db_name",
+  db_name: "db_name",
+  state: "state",
+  error_code: "error_code",
+  error_message: "error_message",
+  "time(ms)": "query_time_ms",
+  time_ms: "query_time_ms",
+  query_time: "query_time_ms",
+  query_time_ms: "query_time_ms",
+  scan_bytes: "scan_bytes",
+  scan_rows: "scan_rows",
+  return_rows: "return_rows",
+  fe_ip: "fe_ip",
+  frontend_ip: "fe_ip",
+  cpu_time_ms: "cpu_time_ms",
+  peak_memory_bytes: "peak_memory_bytes",
+  workload_group: "workload_group",
+  cloud_cluster_name: "cloud_cluster_name",
+  compute_group_name: "cloud_cluster_name",
+  compute_group: "cloud_cluster_name",
+  stmt: "stmt_raw",
+  stmt_raw: "stmt_raw",
+};
+
+const OUTFILE_HEADER_REQUIRED: OutfileColumnKey[] = ["query_id", "time", "client_ip"];
+
 export function unescapeOutfileText(s: string): string {
   if (!s.includes("\\")) return s;
   let out = "";
@@ -65,6 +123,7 @@ export function detectOutfileDelimiter(line: string): AuditLogOutfileDelimiter |
   for (const delimiter of candidates) {
     const fields = splitDelimitedLine(line, delimiter);
     if (!fields) continue;
+    if (tryParseOutfileHeader(fields)) return delimiter;
     if (fields.length !== AUDIT_LOG_OUTFILE_COLS) continue;
     return delimiter;
   }
@@ -72,46 +131,126 @@ export function detectOutfileDelimiter(line: string): AuditLogOutfileDelimiter |
 }
 
 export function isOutfileHeader(fields: readonly string[]): boolean {
-  if (fields.length !== AUDIT_LOG_OUTFILE_COLS) return false;
-  const h0 = fields[0]?.trim().toLowerCase();
-  const h1 = fields[1]?.trim().toLowerCase();
-  const h2 = fields[2]?.trim().toLowerCase();
-  return h0 === "query_id" && h1 === "time" && h2 === "client_ip";
+  return tryParseOutfileHeader(fields) != null;
+}
+
+function normalizeHeaderKey(v: string): OutfileColumnKey | null {
+  const key = v.trim().toLowerCase();
+  return OUTFILE_HEADER_ALIASES[key] ?? null;
+}
+
+function tryParseOutfileHeader(fields: readonly string[]): OutfileHeader | null {
+  if (fields.length < 3) return null;
+  const index: OutfileColumnIndex = {};
+  for (let i = 0; i < fields.length; i++) {
+    const key = normalizeHeaderKey(fields[i] ?? "");
+    if (!key || index[key] != null) continue;
+    index[key] = i;
+  }
+  for (const key of OUTFILE_HEADER_REQUIRED) {
+    if (index[key] == null) return null;
+  }
+  let maxIndex = -1;
+  for (const idx of Object.values(index)) {
+    if (idx != null && idx > maxIndex) maxIndex = idx;
+  }
+  return { index, maxIndex };
+}
+
+function pickField(
+  fields: readonly string[],
+  header: OutfileHeader,
+  key: OutfileColumnKey
+): string | undefined {
+  const idx = header.index[key];
+  if (idx == null || idx < 0 || idx >= fields.length) return undefined;
+  return fields[idx];
 }
 
 export type AuditLogOutfileLineResult =
-  | { kind: "header" }
+  | { kind: "header"; header: OutfileHeader }
   | { kind: "invalid" }
   | { kind: "record"; record: ParsedAuditLogRecord };
 
 export function parseAuditLogOutfileLine(
   line: string,
-  delimiter: AuditLogOutfileDelimiter
+  delimiter: AuditLogOutfileDelimiter,
+  header?: OutfileHeader | null
 ): AuditLogOutfileLineResult {
   const fields = splitDelimitedLine(line, delimiter);
   if (!fields) return { kind: "invalid" };
-  if (fields.length !== AUDIT_LOG_OUTFILE_COLS) return { kind: "invalid" };
-  if (isOutfileHeader(fields)) return { kind: "header" };
+  if (!header) {
+    const parsedHeader = tryParseOutfileHeader(fields);
+    if (parsedHeader) return { kind: "header", header: parsedHeader };
+    if (fields.length !== AUDIT_LOG_OUTFILE_COLS) return { kind: "invalid" };
+  } else if (header.maxIndex >= 0 && fields.length <= header.maxIndex) {
+    return { kind: "invalid" };
+  }
 
-  const queryId = normalizeOutfileNullableText(fields[0]);
-  const time = normalizeOutfileNullableText(fields[1]);
+  const getField = header
+    ? (key: OutfileColumnKey) => pickField(fields, header, key)
+    : (key: OutfileColumnKey) => {
+        switch (key) {
+          case "query_id":
+            return fields[0];
+          case "time":
+            return fields[1];
+          case "client_ip":
+            return fields[2];
+          case "user_name":
+            return fields[3];
+          case "db_name":
+            return fields[5];
+          case "state":
+            return fields[6];
+          case "error_code":
+            return fields[7];
+          case "error_message":
+            return fields[8];
+          case "query_time_ms":
+            return fields[9];
+          case "scan_bytes":
+            return fields[10];
+          case "scan_rows":
+            return fields[11];
+          case "return_rows":
+            return fields[12];
+          case "fe_ip":
+            return fields[21];
+          case "cpu_time_ms":
+            return fields[22];
+          case "peak_memory_bytes":
+            return fields[25];
+          case "workload_group":
+            return fields[26];
+          case "cloud_cluster_name":
+            return fields[27];
+          case "stmt_raw":
+            return fields[28];
+          default:
+            return undefined;
+        }
+      };
+
+  const queryId = normalizeOutfileNullableText(getField("query_id"));
+  const time = normalizeOutfileNullableText(getField("time"));
   const eventTimeMs = time ? parseEventTimeMs(time) : null;
-  const clientIp = normalizeClientIp(normalizeOutfileNullableText(fields[2]));
-  const userName = normalizeOutfileNullableText(fields[3]);
-  const dbName = normalizeOutfileNullableText(fields[5]);
-  const state = normalizeOutfileNullableText(fields[6]);
-  const errorCode = parseOutfileInt(fields[7]);
-  const errorMessage = normalizeOutfileNullableText(fields[8]);
-  const queryTimeMs = parseOutfileInt(fields[9]);
-  const scanBytes = parseOutfileInt(fields[10]);
-  const scanRows = parseOutfileInt(fields[11]);
-  const returnRows = parseOutfileInt(fields[12]);
-  const feIp = normalizeOutfileNullableText(fields[21]);
-  const cpuTimeMs = parseOutfileInt(fields[22]);
-  const peakMemoryBytes = parseOutfileInt(fields[25]);
-  const workloadGroup = normalizeOutfileNullableText(fields[26]);
-  const cloudClusterName = normalizeOutfileNullableText(fields[27]);
-  const stmtRaw = normalizeOutfileNullableText(fields[28]);
+  const clientIp = normalizeClientIp(normalizeOutfileNullableText(getField("client_ip")));
+  const userName = normalizeOutfileNullableText(getField("user_name"));
+  const dbName = normalizeOutfileNullableText(getField("db_name"));
+  const state = normalizeOutfileNullableText(getField("state"));
+  const errorCode = parseOutfileInt(getField("error_code"));
+  const errorMessage = normalizeOutfileNullableText(getField("error_message"));
+  const queryTimeMs = parseOutfileInt(getField("query_time_ms"));
+  const scanBytes = parseOutfileInt(getField("scan_bytes"));
+  const scanRows = parseOutfileInt(getField("scan_rows"));
+  const returnRows = parseOutfileInt(getField("return_rows"));
+  const feIp = normalizeOutfileNullableText(getField("fe_ip"));
+  const cpuTimeMs = parseOutfileInt(getField("cpu_time_ms"));
+  const peakMemoryBytes = parseOutfileInt(getField("peak_memory_bytes"));
+  const workloadGroup = normalizeOutfileNullableText(getField("workload_group"));
+  const cloudClusterName = normalizeOutfileNullableText(getField("cloud_cluster_name"));
+  const stmtRaw = normalizeOutfileNullableText(getField("stmt_raw"));
 
   const baseTemplate = stmtRaw ? normalizeSqlBase(stmtRaw) : null;
   const info = baseTemplate ? getTemplateInfo(baseTemplate) : null;

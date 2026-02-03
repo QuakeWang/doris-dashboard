@@ -63,4 +63,105 @@ describe("parseAuditLogOutfileLine", () => {
     expect(r.sqlTemplateStripped).toBe("select * from test_table where a = ? and b = ?");
     expect(r.tableGuess).toBe("test_db.test_table");
   });
+
+  it("parses TSV export with header mapping", () => {
+    const header = [
+      "query_id",
+      "time",
+      "client_ip",
+      "user",
+      "catalog",
+      "db",
+      "state",
+      "error_code",
+      "error_message",
+      "query_time",
+      "scan_bytes",
+      "scan_rows",
+      "return_rows",
+      "stmt_id",
+      "stmt_type",
+      "is_query",
+      "frontend_ip",
+      "cpu_time_ms",
+      "sql_hash",
+      "sql_digest",
+      "peak_memory_bytes",
+      "workload_group",
+      "stmt",
+    ];
+    const headerRes = parseAuditLogOutfileLine(header.join("\t"), "\t");
+    expect(headerRes.kind).toBe("header");
+    if (headerRes.kind !== "header") throw new Error("expected header");
+
+    const fields = new Array(header.length).fill("0");
+    fields[0] = "test-query-id";
+    fields[1] = "2026-01-05 06:44:17.002000";
+    fields[2] = "203.0.113.10:51178";
+    fields[3] = "test_user";
+    fields[5] = "test_db";
+    fields[6] = "EOF";
+    fields[7] = "0";
+    fields[8] = "";
+    fields[9] = "7522";
+    fields[16] = "203.0.113.10";
+    fields[17] = "27890";
+    fields[20] = "166479328";
+    fields[21] = "test_wg";
+    fields[22] = "select\\n *\\nfrom\\n test_table\\nwhere\\n a = 10 and b = 'x'";
+
+    const line = fields.join("\t");
+    const res = parseAuditLogOutfileLine(line, "\t", headerRes.header);
+    expect(res.kind).toBe("record");
+    if (res.kind !== "record") throw new Error("expected record");
+    const r = res.record;
+    expect(r.queryId).toBe(fields[0]);
+    expect(r.eventTimeMs).toBe(new Date(2026, 0, 5, 6, 44, 17, 2).getTime());
+    expect(r.clientIp).toBe("203.0.113.10");
+    expect(r.userName).toBe("test_user");
+    expect(r.dbName).toBe("test_db");
+    expect(r.state).toBe("EOF");
+    expect(r.queryTimeMs).toBe(7522);
+    expect(r.cpuTimeMs).toBe(27890);
+    expect(r.peakMemoryBytes).toBe(166479328);
+    expect(r.workloadGroup).toBe("test_wg");
+    expect(r.stmtRaw).toContain("from");
+    expect(r.sqlTemplateStripped).toBe("select * from test_table where a = ? and b = ?");
+    expect(r.tableGuess).toBe("test_db.test_table");
+  });
+
+  it("rejects truncated rows when header mapping is active", () => {
+    const header = [
+      "query_id",
+      "time",
+      "client_ip",
+      "user",
+      "catalog",
+      "db",
+      "state",
+      "error_code",
+      "error_message",
+      "query_time",
+      "scan_bytes",
+      "scan_rows",
+      "return_rows",
+      "stmt_id",
+      "stmt_type",
+      "is_query",
+      "frontend_ip",
+      "cpu_time_ms",
+      "sql_hash",
+      "sql_digest",
+      "peak_memory_bytes",
+      "workload_group",
+      "stmt",
+    ];
+    const headerRes = parseAuditLogOutfileLine(header.join("\t"), "\t");
+    expect(headerRes.kind).toBe("header");
+    if (headerRes.kind !== "header") throw new Error("expected header");
+
+    const truncated = new Array(header.length - 1).fill("x").join("\t");
+    const res = parseAuditLogOutfileLine(truncated, "\t", headerRes.header);
+    expect(res.kind).toBe("invalid");
+  });
 });
