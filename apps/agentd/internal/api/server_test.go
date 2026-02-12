@@ -25,6 +25,7 @@ const (
 	exportPath      = "/api/v1/doris/audit-log/export"
 	connTestPath    = "/api/v1/doris/connection/test"
 	databasesPath   = "/api/v1/doris/databases"
+	explainPath     = "/api/v1/doris/explain"
 	explainTreePath = "/api/v1/doris/explain/tree"
 	connTestBody    = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password"}}`
 	connWithDBBody  = `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password","database":"tpch"}}`
@@ -129,8 +130,8 @@ func TestServerErrorResponses(t *testing.T) {
 		},
 		{
 			name:            "explain missing sql",
-			handler:         newServer(noOpExporter, 0, nil, func(context.Context, doris.ConnConfig, string) (string, error) { return "", nil }, nil),
-			req:             newLocalJSONRequest(http.MethodPost, explainTreePath, connTestBody),
+			handler:         newServer(noOpExporter, 0, nil, func(context.Context, doris.ConnConfig, string, string) (string, error) { return "", nil }, nil),
+			req:             newLocalJSONRequest(http.MethodPost, explainPath, connTestBody),
 			wantStatus:      http.StatusBadRequest,
 			wantErrContains: "sql is required",
 		},
@@ -204,13 +205,15 @@ func TestExplainTreeCallsRunner(t *testing.T) {
 
 	var gotCfg doris.ConnConfig
 	var gotSQL string
-	h := newServer(nil, 0, nil, func(ctx context.Context, cfg doris.ConnConfig, sql string) (string, error) {
+	var gotMode string
+	h := newServer(nil, 0, nil, func(ctx context.Context, cfg doris.ConnConfig, sql string, mode string) (string, error) {
 		gotCfg = cfg
 		gotSQL = sql
+		gotMode = mode
 		return "[00]:[0: ResultSink]||[Fragment: 0]||", nil
 	}, nil)
 
-	r := newLocalJSONRequest(http.MethodPost, explainTreePath, explainTreeBody)
+	r := newLocalJSONRequest(http.MethodPost, explainPath, explainTreeBody)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 
@@ -223,7 +226,45 @@ func TestExplainTreeCallsRunner(t *testing.T) {
 	if gotSQL != "SELECT 1" {
 		t.Fatalf("unexpected sql: %q", gotSQL)
 	}
+	if gotMode != "tree" {
+		t.Fatalf("unexpected mode: %q", gotMode)
+	}
 	if !strings.Contains(w.Body.String(), `"rawText":"[00]:[0: ResultSink]||[Fragment: 0]||"`) {
+		t.Fatalf("unexpected response body: %q", w.Body.String())
+	}
+}
+
+func TestExplainPlanCallsRunner(t *testing.T) {
+	t.Parallel()
+
+	var gotCfg doris.ConnConfig
+	var gotSQL string
+	var gotMode string
+	h := newServer(nil, 0, nil, func(ctx context.Context, cfg doris.ConnConfig, sql string, mode string) (string, error) {
+		gotCfg = cfg
+		gotSQL = sql
+		gotMode = mode
+		return "PLAN FRAGMENT 0", nil
+	}, nil)
+
+	body := `{"connection":{"host":"127.0.0.1","port":19030,"user":"test_user","password":"test_password"},"sql":"SELECT 1","mode":"plan"}`
+	r := newLocalJSONRequest(http.MethodPost, explainPath, body)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", w.Code)
+	}
+	if gotCfg.Host != "127.0.0.1" || gotCfg.Port != 19030 || gotCfg.User != "test_user" || gotCfg.Password != "test_password" {
+		t.Fatalf("unexpected cfg: %+v", gotCfg)
+	}
+	if gotSQL != "SELECT 1" {
+		t.Fatalf("unexpected sql: %q", gotSQL)
+	}
+	if gotMode != "plan" {
+		t.Fatalf("unexpected mode: %q", gotMode)
+	}
+	if !strings.Contains(w.Body.String(), `"rawText":"PLAN FRAGMENT 0"`) {
 		t.Fatalf("unexpected response body: %q", w.Body.String())
 	}
 }

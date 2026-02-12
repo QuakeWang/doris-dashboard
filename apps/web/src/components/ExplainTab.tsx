@@ -1,221 +1,270 @@
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Input, Select, Space, Tabs, Typography } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Card, Drawer, Input, Segmented, Select, Space, Typography } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentClient, DorisConnectionInput } from "../agent/agentClient";
-import { parseExplainTree, selectNodesByFragment } from "../explain/parseExplainTree";
+import { buildFragmentGraph } from "../explain/fragmentGraph";
+import {
+  type ExplainNodeOptimizationSignals,
+  buildFragmentOptimizationSignals,
+  buildNodeOptimizationSignals,
+  parseMaterializationSummary,
+} from "../explain/optimizationSignals";
+import { parseExplain, selectNodesByFragment } from "../explain/parseExplainTree";
 import type { ExplainParseResult } from "../explain/types";
-import { buildParentByKey, parseNumberLike } from "../explain/utils";
 import CopyIconButton from "./CopyIconButton";
-import ExplainDiagramTree from "./ExplainDiagramTree";
-import ExplainNodeDrawer from "./ExplainNodeDrawer";
-import ExplainOutlineTree from "./ExplainOutlineTree";
+import ExplainFragmentDagViewer from "./ExplainFragmentDagViewer";
+import ExplainFragmentSummaryBanner from "./ExplainFragmentSummaryBanner";
+import ExplainNodeDetailPanel from "./ExplainNodeDetailPanel";
+import ExplainOperatorList from "./ExplainOperatorList";
+import useExplainInputState from "./useExplainInputState";
 
 const { Text } = Typography;
 const { TextArea } = Input;
+
+type ExplainViewMode = "dag" | "raw";
+type FragmentFlowStats = {
+  upstreamFragments: number;
+  downstreamFragments: number;
+};
+
+const EXPLAIN_VIEW_OPTIONS: Array<{ label: string; value: ExplainViewMode }> = [
+  { label: "Fragment DAG", value: "dag" },
+  { label: "Raw", value: "raw" },
+];
 
 export interface ExplainTabProps {
   agent: AgentClient;
   dorisConn: DorisConnectionInput | null;
   dorisConfigured: boolean;
   onOpenDoris: () => void;
-
   sql: string;
   onChangeSql: (sql: string) => void;
-}
-
-type ViewTabKey = "diagram" | "outline" | "raw";
-
-const DORIS_EXPLAIN_DATABASE_KEY = "doris.explain.database.v1";
-
-function readExplainDatabaseFromSession(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.sessionStorage.getItem(DORIS_EXPLAIN_DATABASE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeExplainDatabaseToSession(db: string): void {
-  if (typeof window === "undefined") return;
-  const trimmed = db.trim();
-  try {
-    if (!trimmed) window.sessionStorage.removeItem(DORIS_EXPLAIN_DATABASE_KEY);
-    else window.sessionStorage.setItem(DORIS_EXPLAIN_DATABASE_KEY, trimmed);
-  } catch {
-    // Ignore storage quota / access errors.
-  }
 }
 
 export default function ExplainTab(props: ExplainTabProps): JSX.Element {
   const { agent, dorisConn, dorisConfigured, onOpenDoris, sql, onChangeSql } = props;
 
-  const [database, setDatabase] = useState(() => readExplainDatabaseFromSession());
-  const [databaseList, setDatabaseList] = useState<string[]>([]);
-  const [databaseLoading, setDatabaseLoading] = useState(false);
-
   const [parseResult, setParseResult] = useState<ExplainParseResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const [selectedFragment, setSelectedFragment] = useState<number | null>(null);
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<ViewTabKey>("outline");
-  const [diagramFocusToken, setDiagramFocusToken] = useState(0);
+  const [selectedFragmentId, setSelectedFragmentId] = useState<number | null>(null);
+  const [activeView, setActiveView] = useState<ExplainViewMode>("dag");
+  const [collapsedFragmentIds, setCollapsedFragmentIds] = useState<Set<number>>(() => new Set());
 
-  const [collapsedChildrenKeys, setCollapsedChildrenKeys] = useState<Set<string>>(() => new Set());
-  const [expandedDetailKeys, setExpandedDetailKeys] = useState<Set<string>>(() => new Set());
-  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
-
-  const runParse = useCallback((text: string) => {
-    setError(null);
-    const res = parseExplainTree(text);
-    setParseResult(res);
-    setSelectedFragment(null);
-    setSelectedNodeKey(null);
-    setActiveView(res.ok ? "outline" : "raw");
+  const resetFragmentState = useCallback(() => {
+    setSelectedFragmentId(null);
+    setCollapsedFragmentIds(new Set());
   }, []);
 
-  const onClearSql = () => {
-    setError(null);
-    onChangeSql("");
-  };
+  const clearNodeSelection = useCallback(() => {
+    setSelectedNodeKey(null);
+  }, []);
 
-  useEffect(() => {
-    setDatabaseLoading(false);
-    setDatabaseList([]);
-  }, [dorisConn]);
+  const resetInspectorSelection = useCallback(() => {
+    setSelectedFragmentId(null);
+    clearNodeSelection();
+  }, [clearNodeSelection]);
 
-  useEffect(() => {
-    writeExplainDatabaseToSession(database);
-  }, [database]);
-
-  const refreshDatabases = async () => {
-    setError(null);
-    if (!dorisConfigured || !dorisConn) {
-      setError("Doris connection is not configured.");
-      onOpenDoris();
-      return;
-    }
-    setDatabaseLoading(true);
-    try {
-      const dbs = await agent.listDorisDatabases({ connection: dorisConn });
-      setDatabaseList(dbs);
-      const currentDb = database.trim();
-      if (!currentDb) {
-        setDatabase(dbs[0] ?? "");
-      } else if (dbs.length > 0 && !dbs.includes(currentDb)) {
-        setDatabase(dbs[0] ?? "");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDatabaseLoading(false);
-    }
-  };
-
-  const onRunExplain = async () => {
-    setError(null);
-    if (!dorisConfigured || !dorisConn) {
-      setError("Doris connection is not configured.");
-      onOpenDoris();
-      return;
-    }
-    const sqlText = sql.trim();
-    if (!sqlText) {
-      setError("SQL is required.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const dbName = database.trim();
-      const conn = dbName ? { ...dorisConn, database: dbName } : dorisConn;
-      const text = await agent.explainTree({ connection: conn, sql: sqlText });
-      runParse(text);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const okRes = parseResult?.ok ? parseResult : null;
-  const fragments = okRes?.fragments ?? [];
-
-  const viewNodes = useMemo(() => {
-    if (!okRes) return [];
-    return selectNodesByFragment(okRes.nodes, selectedFragment);
-  }, [okRes, selectedFragment]);
-
-  useEffect(() => {
-    setCollapsedChildrenKeys(new Set());
-    setExpandedDetailKeys(new Set());
-  }, [viewNodes]);
-
-  const parentByKey = useMemo(() => buildParentByKey(viewNodes), [viewNodes]);
-
-  useEffect(() => {
-    if (!selectedNodeKey) return;
-    let p = parentByKey.get(selectedNodeKey) ?? null;
-    if (!p) return;
-    setCollapsedChildrenKeys((prev) => {
-      const next = new Set(prev);
-      while (p) {
-        next.delete(p);
-        p = parentByKey.get(p) ?? null;
-      }
-      return next;
-    });
-  }, [parentByKey, selectedNodeKey]);
-
-  useEffect(() => {
-    if (!selectedNodeKey) setDetailDrawerOpen(false);
-  }, [selectedNodeKey]);
-
-  const maxCardinality = useMemo(() => {
-    let max = 0;
-    for (const n of viewNodes) {
-      const c = parseNumberLike(n.cardinality);
-      if (c != null) max = Math.max(max, c);
-    }
-    return max;
-  }, [viewNodes]);
-
-  const selectedNode = useMemo(
-    () => (selectedNodeKey ? (viewNodes.find((n) => n.key === selectedNodeKey) ?? null) : null),
-    [selectedNodeKey, viewNodes]
+  const runParse = useCallback(
+    (text: string) => {
+      const res = parseExplain(text);
+      setParseResult(res);
+      clearNodeSelection();
+      resetFragmentState();
+      setActiveView(res.ok ? "dag" : "raw");
+    },
+    [clearNodeSelection, resetFragmentState]
   );
 
-  useEffect(() => {
-    if (selectedNodeKey && !selectedNode) setSelectedNodeKey(null);
-  }, [selectedNode, selectedNodeKey]);
+  const {
+    database,
+    setDatabase,
+    databaseList,
+    databaseLoading,
+    loading,
+    error,
+    onClearSql,
+    refreshDatabases,
+    onRunExplain,
+  } = useExplainInputState({
+    agent,
+    dorisConn,
+    dorisConfigured,
+    onOpenDoris,
+    sql,
+    onChangeSql,
+    onParseResult: runParse,
+  });
 
-  const openNodeDetail = (key: string) => {
+  const okRes = parseResult?.ok ? parseResult : null;
+  const baseNodes = useMemo(() => okRes?.nodes ?? [], [okRes]);
+  const fragmentGraph = useMemo(() => buildFragmentGraph(baseNodes), [baseNodes]);
+
+  const filteredNodes = useMemo(() => {
+    return selectNodesByFragment(baseNodes, selectedFragmentId);
+  }, [baseNodes, selectedFragmentId]);
+
+  const nodeByKey = useMemo(
+    () => new Map(baseNodes.map((node) => [node.key, node] as const)),
+    [baseNodes]
+  );
+  const fragmentSummaryById = useMemo(
+    () => new Map(fragmentGraph.nodes.map((node) => [node.fragmentId, node] as const)),
+    [fragmentGraph.nodes]
+  );
+
+  const fragmentFlowStatsById = useMemo(() => {
+    const upstreamById = new Map<number, Set<number>>();
+    const downstreamById = new Map<number, Set<number>>();
+
+    for (const node of fragmentGraph.nodes) {
+      upstreamById.set(node.fragmentId, new Set<number>());
+      downstreamById.set(node.fragmentId, new Set<number>());
+    }
+
+    for (const edge of fragmentGraph.edges) {
+      downstreamById.get(edge.fromFragmentId)?.add(edge.toFragmentId);
+      upstreamById.get(edge.toFragmentId)?.add(edge.fromFragmentId);
+    }
+
+    const stats = new Map<number, FragmentFlowStats>();
+    for (const node of fragmentGraph.nodes) {
+      stats.set(node.fragmentId, {
+        upstreamFragments: upstreamById.get(node.fragmentId)?.size ?? 0,
+        downstreamFragments: downstreamById.get(node.fragmentId)?.size ?? 0,
+      });
+    }
+    return stats;
+  }, [fragmentGraph.edges, fragmentGraph.nodes]);
+
+  const detailNode = useMemo(
+    () => (selectedNodeKey ? (nodeByKey.get(selectedNodeKey) ?? null) : null),
+    [nodeByKey, selectedNodeKey]
+  );
+
+  const detailFragmentId = detailNode?.fragmentId ?? null;
+
+  const inspectorFragmentSummary = useMemo(() => {
+    const fragmentId = detailNode?.fragmentId ?? selectedFragmentId;
+    if (fragmentId == null) return null;
+    return fragmentSummaryById.get(fragmentId) ?? null;
+  }, [detailNode?.fragmentId, fragmentSummaryById, selectedFragmentId]);
+
+  useEffect(() => {
+    if (selectedNodeKey && !nodeByKey.has(selectedNodeKey)) {
+      setSelectedNodeKey(null);
+    }
+  }, [nodeByKey, selectedNodeKey]);
+
+  useEffect(() => {
+    if (selectedFragmentId == null) return;
+    if (!fragmentSummaryById.has(selectedFragmentId)) {
+      setSelectedFragmentId(null);
+    }
+  }, [fragmentSummaryById, selectedFragmentId]);
+
+  const onSelectNode = (key: string) => {
+    if (selectedNodeKey === key) {
+      resetInspectorSelection();
+      return;
+    }
+
     setSelectedNodeKey(key);
-    setDetailDrawerOpen(true);
+    const node = nodeByKey.get(key) ?? null;
+    setSelectedFragmentId(node?.fragmentId ?? null);
   };
 
-  const DIAGRAM_MAX_NODES = 2000;
-  const diagramDisabled = viewNodes.length > DIAGRAM_MAX_NODES;
-  const lastViewRef = useRef<ViewTabKey>(activeView);
+  const onSelectFragment = (fragmentId: number) => {
+    if (selectedFragmentId === fragmentId && selectedNodeKey == null) {
+      resetInspectorSelection();
+      return;
+    }
 
-  useEffect(() => {
-    if (activeView !== "diagram") return;
-    if (!diagramDisabled) return;
-    setActiveView("outline");
-  }, [activeView, diagramDisabled]);
+    setSelectedFragmentId(fragmentId);
+    clearNodeSelection();
+  };
 
-  useEffect(() => {
-    const prev = lastViewRef.current;
-    lastViewRef.current = activeView;
-    if (prev === "diagram" || activeView !== "diagram") return;
-    if (!selectedNodeKey) return;
-    setDiagramFocusToken((t) => t + 1);
-  }, [activeView, selectedNodeKey]);
-
+  const onClearFragmentFilter = () => {
+    resetInspectorSelection();
+  };
   const showParseAlert = !!parseResult && !parseResult.ok;
-  const warningCount = okRes?.warnings.length ?? 0;
+  const explainRawText = okRes?.rawText ?? "";
+  const dagDetailDrawerOpen =
+    activeView === "dag" && (selectedFragmentId != null || detailNode != null);
+
+  useEffect(() => {
+    if (!dagDetailDrawerOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      resetInspectorSelection();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dagDetailDrawerOpen, resetInspectorSelection]);
+  const hasUnknownColumnStats = useMemo(
+    () => /planned with unknown column statistics/i.test(explainRawText),
+    [explainRawText]
+  );
+  const materializationSummary = useMemo(
+    () => parseMaterializationSummary(explainRawText),
+    [explainRawText]
+  );
+  const nodeSignalsByKey = useMemo(() => {
+    const map = new Map<string, ExplainNodeOptimizationSignals>();
+    for (const node of baseNodes) {
+      map.set(node.key, buildNodeOptimizationSignals(node, materializationSummary));
+    }
+    return map;
+  }, [baseNodes, materializationSummary]);
+  const fragmentOptimizationSignals = useMemo(
+    () => buildFragmentOptimizationSignals(baseNodes, nodeSignalsByKey),
+    [baseNodes, nodeSignalsByKey]
+  );
+
+  const onResetWorkspace = () => {
+    clearNodeSelection();
+    resetFragmentState();
+  };
+
+  const renderDagInspectorContent = () => (
+    <>
+      <div className="dd-explain-drawer-summary">
+        {inspectorFragmentSummary ? (
+          <ExplainFragmentSummaryBanner
+            summary={inspectorFragmentSummary}
+            flow={fragmentFlowStatsById.get(inspectorFragmentSummary.fragmentId) ?? null}
+            hasUnknownColumnStats={hasUnknownColumnStats}
+            optimizationSignals={
+              fragmentOptimizationSignals.get(inspectorFragmentSummary.fragmentId) ?? null
+            }
+          />
+        ) : (
+          <Text type="secondary">Select a fragment or plan node to inspect details.</Text>
+        )}
+      </div>
+
+      <section className="dd-explain-drawer-pane dd-explain-drawer-pane-operators">
+        <div className="dd-explain-drawer-pane-body">
+          {detailNode ? (
+            <ExplainNodeDetailPanel
+              node={detailNode}
+              nodeSignalsByKey={nodeSignalsByKey}
+              onBack={clearNodeSelection}
+            />
+          ) : (
+            <ExplainOperatorList
+              nodes={filteredNodes}
+              selectedNodeKey={selectedNodeKey}
+              onSelectNodeKey={onSelectNode}
+              nodeSignalsByKey={nodeSignalsByKey}
+            />
+          )}
+        </div>
+      </section>
+    </>
+  );
 
   return (
     <Space direction="vertical" style={{ width: "100%" }} size="middle">
@@ -236,12 +285,12 @@ export default function ExplainTab(props: ExplainTabProps): JSX.Element {
             <TextArea
               value={sql}
               onChange={(e) => onChangeSql(e.target.value)}
-              placeholder="SQL to explain (no EXPLAIN prefix required)"
+              placeholder="SQL to explain (auto mode: EXPLAIN TREE -> tree, others -> plan)"
               autoSize={{ minRows: 5, maxRows: 10 }}
             />
             <Space wrap>
               <Button type="primary" onClick={() => void onRunExplain()} loading={loading}>
-                Run EXPLAIN TREE
+                Run EXPLAIN
               </Button>
               {!dorisConfigured || !dorisConn ? (
                 <Text type="secondary">no doris connection (use header button)</Text>
@@ -274,16 +323,16 @@ export default function ExplainTab(props: ExplainTabProps): JSX.Element {
             </Space>
           </Space>
 
-          {error && (
+          {error ? (
             <Alert
               type="error"
               message="Error"
               description={<Text style={{ whiteSpace: "pre-wrap" }}>{error}</Text>}
               showIcon
             />
-          )}
+          ) : null}
 
-          {showParseAlert && (
+          {showParseAlert ? (
             <Alert
               type="warning"
               message="Parse failed"
@@ -294,116 +343,80 @@ export default function ExplainTab(props: ExplainTabProps): JSX.Element {
               }
               showIcon
             />
-          )}
+          ) : null}
         </Space>
       </Card>
 
-      <Card
-        size="small"
-        title="Explain Viewer"
-        extra={
-          <Space>
-            {okRes ? (
-              <>
-                <Text type="secondary">
-                  nodes: <Text code>{okRes.nodes.length}</Text>
-                </Text>
-                {warningCount > 0 ? (
-                  <Text type="secondary">
-                    warnings: <Text code>{warningCount}</Text>
-                  </Text>
+      {okRes ? (
+        <div className="dd-explain-layout dd-explain-layout-dag">
+          <div className="dd-explain-shell dd-explain-shell-main">
+            <div className="dd-explain-shell-header dd-explain-main-header">
+              <Space size={8} wrap>
+                <Segmented
+                  value={activeView}
+                  onChange={(value) => setActiveView(String(value) as ExplainViewMode)}
+                  options={EXPLAIN_VIEW_OPTIONS}
+                />
+                {selectedFragmentId != null ? (
+                  <>
+                    <Text type="secondary">
+                      fragment: <Text code>{selectedFragmentId}</Text>
+                    </Text>
+                    <Button size="small" type="link" onClick={onClearFragmentFilter}>
+                      clear fragment filter
+                    </Button>
+                  </>
                 ) : null}
-              </>
-            ) : (
-              <Text type="secondary">Run EXPLAIN TREE to view</Text>
-            )}
-          </Space>
-        }
-      >
-        <Space direction="vertical" style={{ width: "100%" }} size={12}>
-          <Space
-            wrap
-            size={8}
-            style={{ width: "100%", justifyContent: "space-between", display: "flex" }}
+              </Space>
+              <Button size="small" type="text" onClick={onResetWorkspace}>
+                Reset
+              </Button>
+            </div>
+
+            <div className="dd-explain-shell-body dd-explain-main-body">
+              {activeView === "dag" ? (
+                <ExplainFragmentDagViewer
+                  graph={fragmentGraph}
+                  selectedFragmentId={selectedFragmentId}
+                  detailFragmentId={detailFragmentId}
+                  onSelectFragment={onSelectFragment}
+                  onBackgroundClick={resetInspectorSelection}
+                  collapsedFragmentIds={collapsedFragmentIds}
+                  setCollapsedFragmentIds={setCollapsedFragmentIds}
+                />
+              ) : null}
+
+              {activeView === "raw" ? (
+                <pre className="dd-sql-block dd-explain-raw-view">
+                  <code>{parseResult?.rawText ?? ""}</code>
+                </pre>
+              ) : null}
+            </div>
+          </div>
+
+          <Drawer
+            title="Inspector"
+            placement="right"
+            width={420}
+            open={dagDetailDrawerOpen}
+            mask={false}
+            push={false}
+            destroyOnClose={false}
+            onClose={resetInspectorSelection}
           >
-            <Space wrap size={8}>
-              <Text type="secondary">Fragment:</Text>
-              <Select
-                value={selectedFragment ?? "__all__"}
-                onChange={(v) => {
-                  setSelectedNodeKey(null);
-                  setSelectedFragment(v === "__all__" ? null : Number(v));
-                }}
-                style={{ width: 220 }}
-                disabled={!okRes}
-                options={[
-                  { value: "__all__", label: "All" },
-                  ...fragments.map((f) => ({ value: String(f), label: `Fragment ${f}` })),
-                ]}
-              />
-            </Space>
-          </Space>
-
-          <Tabs
-            activeKey={activeView}
-            onChange={(k) => setActiveView(k as ViewTabKey)}
-            items={[
-              {
-                key: "diagram",
-                label: "Diagram",
-                disabled: !okRes || diagramDisabled,
-                children:
-                  activeView === "diagram" ? (
-                    <ExplainDiagramTree
-                      nodes={viewNodes}
-                      selectedNodeKey={selectedNodeKey}
-                      onOpenNodeKey={openNodeDetail}
-                      focusToken={diagramFocusToken}
-                      maxCardinality={maxCardinality}
-                      collapsedChildrenKeys={collapsedChildrenKeys}
-                      setCollapsedChildrenKeys={setCollapsedChildrenKeys}
-                    />
-                  ) : null,
-              },
-              {
-                key: "outline",
-                label: "Outline",
-                disabled: !okRes,
-                children: (
-                  <ExplainOutlineTree
-                    nodes={viewNodes}
-                    selectedNodeKey={selectedNodeKey}
-                    onOpenNodeKey={openNodeDetail}
-                    maxCardinality={maxCardinality}
-                    collapsedChildrenKeys={collapsedChildrenKeys}
-                    setCollapsedChildrenKeys={setCollapsedChildrenKeys}
-                    expandedDetailKeys={expandedDetailKeys}
-                    setExpandedDetailKeys={setExpandedDetailKeys}
-                  />
-                ),
-              },
-              {
-                key: "raw",
-                label: "Raw",
-                children: (
-                  <pre
-                    className="dd-sql-block"
-                    style={{ margin: 0, maxHeight: 520, overflow: "auto" }}
-                  >
-                    <code>{parseResult?.rawText ?? ""}</code>
-                  </pre>
-                ),
-              },
-            ]}
-          />
-        </Space>
-      </Card>
-
-      <ExplainNodeDrawer
-        open={detailDrawerOpen}
-        node={selectedNode}
-        onClose={() => setDetailDrawerOpen(false)}
-      />
+            <div className="dd-explain-drawer-body">{renderDagInspectorContent()}</div>
+          </Drawer>
+        </div>
+      ) : (
+        <div className="dd-explain-workspace-empty">
+          <Text type="secondary">Run EXPLAIN to build workbench.</Text>
+          {parseResult?.rawText ? (
+            <pre className="dd-sql-block dd-explain-empty-raw">
+              <code>{parseResult.rawText}</code>
+            </pre>
+          ) : null}
+        </div>
+      )}
     </Space>
   );
 }

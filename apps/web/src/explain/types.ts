@@ -1,7 +1,7 @@
 export type ExplainParseResult =
   | {
       ok: true;
-      format: "tree";
+      format: "tree" | "plan";
       rawText: string;
       fragments: number[];
       nodes: ExplainNode[];
