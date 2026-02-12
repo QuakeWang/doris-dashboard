@@ -21,7 +21,7 @@ type AuditLogExporter func(
 	w io.Writer,
 ) error
 
-type ExplainTreeRunner func(ctx context.Context, cfg doris.ConnConfig, sql string) (string, error)
+type ExplainRunner func(ctx context.Context, cfg doris.ConnConfig, sql string, mode string) (string, error)
 
 type ListDatabasesRunner func(ctx context.Context, cfg doris.ConnConfig) ([]string, error)
 
@@ -108,10 +108,27 @@ func parseConnConfigOrWriteError(w http.ResponseWriter, c *dorisConnection) (dor
 	return cfg, true
 }
 
+func applyReadWriteTimeout(cfg *doris.ConnConfig, timeout time.Duration) {
+	cfg.ReadTimeout = timeout
+	cfg.WriteTimeout = timeout
+}
+
+func normalizeExplainMode(mode string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(mode))
+	switch normalized {
+	case "", "tree":
+		return "tree", nil
+	case "plan":
+		return "plan", nil
+	default:
+		return "", errors.New("unsupported explain mode: " + normalized)
+	}
+}
+
 type Server struct {
 	exportAuditLog AuditLogExporter
 	queryVersion   func(ctx context.Context, cfg doris.ConnConfig) (string, error)
-	explainTree    ExplainTreeRunner
+	explain        ExplainRunner
 	listDatabases  ListDatabasesRunner
 	exportTimeout  time.Duration
 }
@@ -132,7 +149,7 @@ func newServer(
 	exporter AuditLogExporter,
 	exportTimeout time.Duration,
 	queryVersion func(ctx context.Context, cfg doris.ConnConfig) (string, error),
-	explainTree ExplainTreeRunner,
+	explain ExplainRunner,
 	listDatabases ListDatabasesRunner,
 ) http.Handler {
 	if exporter == nil {
@@ -144,8 +161,17 @@ func newServer(
 	if queryVersion == nil {
 		queryVersion = doris.QueryVersion
 	}
-	if explainTree == nil {
-		explainTree = doris.ExplainTree
+	if explain == nil {
+		explain = func(ctx context.Context, cfg doris.ConnConfig, sqlText string, mode string) (string, error) {
+			normalizedMode, err := normalizeExplainMode(mode)
+			if err != nil {
+				return "", err
+			}
+			if normalizedMode == "plan" {
+				return doris.ExplainPlan(ctx, cfg, sqlText)
+			}
+			return doris.ExplainTree(ctx, cfg, sqlText)
+		}
 	}
 	if listDatabases == nil {
 		listDatabases = doris.ListDatabases
@@ -154,7 +180,7 @@ func newServer(
 	server := &Server{
 		exportAuditLog: exporter,
 		queryVersion:   queryVersion,
-		explainTree:    explainTree,
+		explain:        explain,
 		listDatabases:  listDatabases,
 		exportTimeout:  exportTimeout,
 	}
@@ -163,7 +189,8 @@ func newServer(
 	mux.HandleFunc("/api/v1/doris/connection/test", server.handleDorisConnectionTest)
 	mux.HandleFunc("/api/v1/doris/databases", server.handleDorisDatabases)
 	mux.HandleFunc("/api/v1/doris/audit-log/export", server.handleDorisAuditLogExport)
-	mux.HandleFunc("/api/v1/doris/explain/tree", server.handleDorisExplainTree)
+	mux.HandleFunc("/api/v1/doris/explain", server.handleDorisExplain)
+	mux.HandleFunc("/api/v1/doris/explain/tree", server.handleDorisExplain)
 	return withLocalOnly(withCORS(mux))
 }
 
@@ -244,8 +271,7 @@ func (s *Server) handleDorisConnectionTest(w http.ResponseWriter, r *http.Reques
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	cfg.ReadTimeout = 15 * time.Second
-	cfg.WriteTimeout = 15 * time.Second
+	applyReadWriteTimeout(&cfg, 15*time.Second)
 	version, err := s.queryVersion(ctx, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -274,8 +300,7 @@ func (s *Server) handleDorisDatabases(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	cfg.ReadTimeout = 20 * time.Second
-	cfg.WriteTimeout = 20 * time.Second
+	applyReadWriteTimeout(&cfg, 20*time.Second)
 	databases, err := s.listDatabases(ctx, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -320,8 +345,7 @@ func (s *Server) handleDorisAuditLogExport(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	cw := &countingWriter{w: w}
-	cfg.ReadTimeout = s.exportTimeout + 10*time.Second
-	cfg.WriteTimeout = s.exportTimeout + 10*time.Second
+	applyReadWriteTimeout(&cfg, s.exportTimeout+10*time.Second)
 	if err := s.exportAuditLog(ctx, cfg, req.LookbackSeconds, req.Limit, cw); err != nil {
 		if cw.n == 0 {
 			w.Header().Del("Content-Disposition")
@@ -333,13 +357,14 @@ func (s *Server) handleDorisAuditLogExport(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *Server) handleDorisExplainTree(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDorisExplain(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req struct {
 		Connection *dorisConnection `json:"connection"`
 		SQL        string           `json:"sql"`
+		Mode       string           `json:"mode"`
 	}
 	if !readJSONOrWriteError(w, r, &req) {
 		return
@@ -356,9 +381,14 @@ func (s *Server) handleDorisExplainTree(w http.ResponseWriter, r *http.Request) 
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	cfg.ReadTimeout = 20 * time.Second
-	cfg.WriteTimeout = 20 * time.Second
-	rawText, err := s.explainTree(ctx, cfg, sqlText)
+	applyReadWriteTimeout(&cfg, 20*time.Second)
+	mode, err := normalizeExplainMode(req.Mode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	rawText, err := s.explain(ctx, cfg, sqlText, mode)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

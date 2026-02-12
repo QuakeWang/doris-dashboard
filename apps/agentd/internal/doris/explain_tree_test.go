@@ -158,3 +158,43 @@ func TestParseLeadingUseDatabase(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildExplainPlanQuery(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "plain sql", in: "select 1", want: "EXPLAIN select 1"},
+		{name: "plain sql with semicolon", in: "select 1;", want: "EXPLAIN select 1"},
+		{name: "explain select", in: "explain select 1", want: "EXPLAIN select 1"},
+		{name: "explain tree passthrough", in: "EXPLAIN TREE select 1", want: "EXPLAIN TREE select 1"},
+		{name: "explain verbose", in: "EXPLAIN VERBOSE select 1", want: "EXPLAIN VERBOSE select 1"},
+		{name: "explain graph rejected", in: "EXPLAIN GRAPH select 1", wantErr: true},
+		{name: "explain dump rejected", in: "EXPLAIN DUMP select 1", wantErr: true},
+		{name: "explain process rejected", in: "EXPLAIN PROCESS select 1", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := buildExplainPlanQuery(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (result=%q)", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("unexpected result:\nwant: %q\ngot:  %q", tc.want, got)
+			}
+		})
+	}
+}

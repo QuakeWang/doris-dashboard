@@ -143,7 +143,7 @@ func stripLeadingCommentsAndSpace(s string) string {
 	}
 }
 
-func buildExplainTreeQuery(sqlText string) (string, error) {
+func normalizeExplainSQL(sqlText string) (string, error) {
 	sqlText = strings.TrimSpace(sqlText)
 	if sqlText == "" {
 		return "", errors.New("sql is required")
@@ -155,6 +155,15 @@ func buildExplainTreeQuery(sqlText string) (string, error) {
 	if strings.TrimSpace(sqlText) == "" {
 		return "", errors.New("sql is required")
 	}
+	return sqlText, nil
+}
+
+func buildExplainTreeQuery(sqlText string) (string, error) {
+	normalizedSQL, err := normalizeExplainSQL(sqlText)
+	if err != nil {
+		return "", err
+	}
+	sqlText = normalizedSQL
 
 	upper := strings.ToUpper(sqlText)
 	if strings.HasPrefix(upper, "EXPLAIN") {
@@ -211,7 +220,41 @@ func buildExplainTreeQuery(sqlText string) (string, error) {
 	return "EXPLAIN TREE " + sqlText, nil
 }
 
-func ExplainTree(ctx context.Context, cfg ConnConfig, sqlText string) (string, error) {
+func buildExplainPlanQuery(sqlText string) (string, error) {
+	normalizedSQL, err := normalizeExplainSQL(sqlText)
+	if err != nil {
+		return "", err
+	}
+	sqlText = normalizedSQL
+
+	upper := strings.ToUpper(sqlText)
+	if strings.HasPrefix(upper, "EXPLAIN") {
+		rest := strings.TrimSpace(sqlText[len("EXPLAIN"):])
+		if rest == "" {
+			return "", errors.New("sql is required")
+		}
+		word, _ := scanLeadingWord(rest)
+		wordUpper := strings.ToUpper(word)
+		if wordUpper == "PROCESS" {
+			return "", errors.New("EXPLAIN PROCESS is not supported")
+		}
+		if wordUpper == "GRAPH" || wordUpper == "DUMP" {
+			return "", errors.New("only EXPLAIN PLAN is supported")
+		}
+		return "EXPLAIN " + rest, nil
+	}
+
+	return "EXPLAIN " + sqlText, nil
+}
+
+type explainQueryBuilder func(sqlText string) (string, error)
+
+func explainWithBuilder(
+	ctx context.Context,
+	cfg ConnConfig,
+	sqlText string,
+	builder explainQueryBuilder,
+) (string, error) {
 	dbName, restSQL, hasUse, err := parseLeadingUseDatabase(sqlText)
 	if err != nil {
 		return "", err
@@ -221,7 +264,7 @@ func ExplainTree(ctx context.Context, cfg ConnConfig, sqlText string) (string, e
 		cfg.Database = ""
 	}
 
-	queryText, err := buildExplainTreeQuery(sqlText)
+	queryText, err := builder(sqlText)
 	if err != nil {
 		return "", err
 	}
@@ -290,4 +333,12 @@ func ExplainTree(ctx context.Context, cfg ConnConfig, sqlText string) (string, e
 		return "", err
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+func ExplainTree(ctx context.Context, cfg ConnConfig, sqlText string) (string, error) {
+	return explainWithBuilder(ctx, cfg, sqlText, buildExplainTreeQuery)
+}
+
+func ExplainPlan(ctx context.Context, cfg ConnConfig, sqlText string) (string, error) {
+	return explainWithBuilder(ctx, cfg, sqlText, buildExplainPlanQuery)
 }

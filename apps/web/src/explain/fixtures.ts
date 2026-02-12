@@ -17,3 +17,31 @@ export const EXPLAIN_TREE_FIXTURE_MULTI_FRAGMENT = `Explain String(Nereids Plann
 --------------[00]:[0: VOlapScanNode]||[Fragment: 2]||TABLE: tpch.lineitem(lineitem)||cardinality=149,996,355||afterFilter=1,841,539||PREDICATES: 2||
 ========== STATISTICS ==========
 `;
+
+export const EXPLAIN_PLAN_FIXTURE_SIMPLE = `Explain String(Nereids Planner)
+PLAN FRAGMENT 0
+  OUTPUT EXPRS:
+    k1[#0]
+  PARTITION: UNPARTITIONED
+
+  VRESULT SINK
+     MYSQL_PROTOCAL
+
+  1:VEXCHANGE
+     offset: 0
+
+PLAN FRAGMENT 1
+  PARTITION: HASH_PARTITIONED: k1[#0]
+
+  STREAM DATA SINK
+    EXCHANGE ID: 01
+    UNPARTITIONED
+
+  0:VOlapScanNode(85)
+     TABLE: test_db.t(t)
+     PREDICATES: ((k1[#0] >= '2024-01-10'))
+     partitions=1/3 (p202401)
+     tablets=1/1, tabletList=123
+     cardinality=1
+========== STATISTICS ==========
+`;

@@ -121,15 +121,11 @@ export class AgentClient {
     return await this.postBlob("/api/v1/doris/audit-log/export", params, signal);
   }
 
-  async explainTree(
-    params: { connection: DorisConnectionInput; sql: string },
+  async explain(
+    params: { connection: DorisConnectionInput; sql: string; mode?: "tree" | "plan" },
     signal?: AbortSignal
   ): Promise<string> {
-    const res = await this.postJson<{ rawText: string }>(
-      "/api/v1/doris/explain/tree",
-      params,
-      signal
-    );
+    const res = await this.postJson<{ rawText: string }>("/api/v1/doris/explain", params, signal);
     return res.rawText;
   }
 }
