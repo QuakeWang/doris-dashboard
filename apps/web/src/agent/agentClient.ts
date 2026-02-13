@@ -9,6 +9,22 @@ export type DorisConnectionInput = DorisConnectionInfo & {
   password: string;
 };
 
+type ApiSuccess<T> = {
+  ok: true;
+  data: T;
+  traceId?: string;
+};
+
+type ApiFailure = {
+  ok: false;
+  error?: { message?: string };
+  traceId?: string;
+};
+
+function toTraceSuffix(traceId: unknown): string {
+  return typeof traceId === "string" && traceId.trim() ? ` (traceId=${traceId.trim()})` : "";
+}
+
 function parseErrMessage(text: string): string | null {
   let v: unknown;
   try {
@@ -17,9 +33,28 @@ function parseErrMessage(text: string): string | null {
     return null;
   }
   const x = v as any;
-  return x && x.ok === false && typeof x?.error?.message === "string"
-    ? (x.error.message as string)
-    : null;
+  if (x && x.ok === false && typeof x?.error?.message === "string") {
+    return `${x.error.message as string}${toTraceSuffix(x.traceId)}`;
+  }
+  return null;
+}
+
+function isApiSuccess<T>(v: unknown): v is ApiSuccess<T> {
+  const x = v as any;
+  return x && x.ok === true && "data" in x;
+}
+
+function isApiFailure(v: unknown): v is ApiFailure {
+  const x = v as any;
+  return x && x.ok === false;
+}
+
+function toApiErrorMessage(failure: ApiFailure): string {
+  const message =
+    typeof failure.error?.message === "string" && failure.error.message
+      ? failure.error.message
+      : "Request failed";
+  return `${message}${toTraceSuffix(failure.traceId)}`;
 }
 
 async function toResponseError(res: Response): Promise<Error> {
@@ -79,11 +114,15 @@ export class AgentClient {
   private async postJson<T>(path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.post(path, payload, signal);
     if (!res.ok) throw await toResponseError(res);
+    let body: unknown;
     try {
-      return (await res.json()) as T;
+      body = (await res.json()) as unknown;
     } catch {
       throw new Error("Request interrupted. Please retry.");
     }
+    if (isApiSuccess<T>(body)) return body.data;
+    if (isApiFailure(body)) throw new Error(toApiErrorMessage(body));
+    return body as T;
   }
 
   async testDorisConnection(

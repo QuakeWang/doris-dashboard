@@ -1,4 +1,3 @@
-import { Alert, Button, Card, Layout, Space, Spin, Tabs, Typography } from "antd";
 import { useCallback, useMemo, useState } from "react";
 import {
   AgentClient,
@@ -6,23 +5,14 @@ import {
   type DorisConnectionInput,
   isDorisConnectionConfigured,
 } from "./agent/agentClient";
-import {
-  type TabKey,
-  toErrorMessage,
-  useDatasetQueries,
-  useDuckDbSession,
-  useTabState,
-} from "./app/hooks";
-import AppHeader from "./components/AppHeader";
+import { useDiagnosticsNavigation } from "./app/diagnosticsNavigation";
+import { toErrorMessage, useDatasetQueries, useDuckDbSession } from "./app/hooks";
+import AuditWorkspace from "./components/AuditWorkspace";
+import DiagnosticsShell from "./components/DiagnosticsShell";
 import DorisAuditLogImportModal from "./components/DorisAuditLogImportModal";
 import DorisConnectionModal from "./components/DorisConnectionModal";
-import ExplainTab from "./components/ExplainTab";
-import FiltersCard from "./components/FiltersCard";
-import ImportCard from "./components/ImportCard";
-import OverviewTab from "./components/OverviewTab";
-import ShareTab from "./components/ShareTab";
+import ExplainWorkspace from "./components/ExplainWorkspace";
 import TemplateDetailDrawer, { type TemplateRef } from "./components/TemplateDetailDrawer";
-import TopSqlTab from "./components/TopSqlTab";
 import { DbClient } from "./db/client/dbClient";
 import type {
   ImportProgress,
@@ -32,12 +22,9 @@ import type {
   TopSqlRow,
 } from "./db/client/protocol";
 
-const { Content } = Layout;
-const { Text } = Typography;
-
 const DEFAULT_FILTERS: QueryFilters = { excludeInternal: true };
 const DUCKDB_WASM_OOB_ERROR =
-  "DuckDB wasm crashed with 'memory access out of bounds'.\nThis is usually triggered by large inserts or a wasm runtime limitation.\nTry: reload the page and re-import; or switch to a Chromium-based browser.\nIf it persists, please share a small log snippet that reproduces the crash.";
+  "The local analysis engine crashed due to browser memory limits.\nTry: reload the page and re-import, or switch to a Chromium-based browser.\nIf it persists, please share a small log snippet that reproduces the issue.";
 
 const DORIS_SESSION_KEY = "doris.connection.info.v1";
 
@@ -74,15 +61,14 @@ export default function App(): JSX.Element {
   const isCoi = typeof window !== "undefined" && window.crossOriginIsolated === true;
 
   const [error, setError] = useState<string | null>(null);
-  const { ready, datasetId, createDataset, retryInit } = useDuckDbSession(client, setError);
+  const { ready, datasetId, retryInit } = useDuckDbSession(client, setError);
 
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
 
   const [filtersDraft, setFiltersDraft] = useState<QueryFilters>(DEFAULT_FILTERS);
   const [filters, setFilters] = useState<QueryFilters>(DEFAULT_FILTERS);
-
-  const { activeTab, setTab } = useTabState();
+  const { activeModule, activeAuditTab, switchModule, switchAuditTab } = useDiagnosticsNavigation();
 
   const [topSqlSearch, setTopSqlSearch] = useState("");
   const [templateDrawer, setTemplateDrawer] = useState<TemplateRef | null>(null);
@@ -126,24 +112,12 @@ export default function App(): JSX.Element {
     client,
     datasetId,
     importing,
-    activeTab,
+    activeTab: activeModule === "audit" ? activeAuditTab : null,
     filters,
     shareTopN,
     shareRankBy,
     setError,
   });
-
-  const createNewDataset = async () => {
-    setError(null);
-    [overviewQuery, topSqlQuery, shareQuery].forEach((q) => q.reset());
-    setTemplateDrawer(null);
-    setImportProgress(null);
-    try {
-      await createDataset(`session-${Date.now()}`);
-    } catch (e) {
-      setError(toErrorMessage(e));
-    }
-  };
 
   const runImport = async (file: File) => {
     if (!datasetId) return;
@@ -203,186 +177,80 @@ export default function App(): JSX.Element {
   const dorisLabel = dorisConn ? `${dorisConn.user}@${dorisConn.host}:${dorisConn.port}` : "-";
   const dorisConfigured = isDorisConnectionConfigured(dorisConn);
 
-  const openExplainWithSql = useCallback(
-    (sqlText: string) => {
-      setExplainSql(sqlText);
-      setTab("explain");
-    },
-    [setTab]
-  );
-
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      <AppHeader
+    <>
+      <DiagnosticsShell
         ready={ready}
-        importing={importing}
-        datasetId={datasetId}
         isCoi={isCoi}
         dorisLabel={dorisLabel}
-        onNewDataset={createNewDataset}
+        activeModule={activeModule}
+        onSwitchModule={switchModule}
         onOpenDoris={openDorisModal}
-      />
-
-      <Content style={{ padding: 24, maxWidth: 1360, width: "100%", margin: "0 auto" }}>
-        {!ready && !error && (
-          <Card>
-            <Spin /> <Text>Initializing DuckDB...</Text>
-          </Card>
-        )}
-        {error && (
-          <Alert
-            type="error"
-            message="Error"
-            description={<Text style={{ whiteSpace: "pre-wrap" }}>{error}</Text>}
-            showIcon
-            closable={ready}
-            action={
-              !ready ? (
-                <Space>
-                  <Button size="small" onClick={retryInit}>
-                    Retry
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      if (typeof window !== "undefined") window.location.reload();
-                    }}
-                  >
-                    Reload
-                  </Button>
-                </Space>
-              ) : null
-            }
-            style={{ marginBottom: 12 }}
-            onClose={() => setError(null)}
+        error={error}
+        onRetryInit={retryInit}
+        onDismissError={() => setError(null)}
+      >
+        {activeModule === "audit" ? (
+          <AuditWorkspace
+            ready={ready}
+            datasetId={datasetId}
+            importing={importing}
+            importProgress={importProgress}
+            dorisConfigured={dorisConfigured}
+            onOpenDoris={openDorisModal}
+            onOpenDorisImport={openDorisImport}
+            onImport={runImport}
+            onCancel={() => void client.cancelCurrentTask().catch(() => undefined)}
+            overview={overviewQuery.data}
+            filtersDraft={filtersDraft}
+            onPatchFiltersDraft={patchFiltersDraft}
+            onApplyFilters={() => setFilters(filtersDraft)}
+            onSetFiltersBoth={setFiltersBoth}
+            activeAuditTab={activeAuditTab}
+            onSwitchAuditTab={switchAuditTab}
+            overviewLoading={overviewQuery.loading}
+            onRefreshOverview={overviewQuery.reload}
+            onPatchFiltersBoth={patchFiltersBoth}
+            onJumpToTopSqlByTable={(tableName) => {
+              setTopSqlSearch(tableName);
+              switchAuditTab("topSql");
+            }}
+            topSqlLoading={topSqlQuery.loading}
+            topSqlRows={topSqlQuery.data}
+            topSqlSearch={topSqlSearch}
+            onChangeTopSqlSearch={setTopSqlSearch}
+            onRefreshTopSql={topSqlQuery.reload}
+            onOpenTopSqlTemplate={openTemplateFromTopSql}
+            shareLoading={shareQuery.loading}
+            shareRows={shareQuery.data}
+            shareMetric={shareMetric}
+            shareRankBy={shareRankBy}
+            shareChartType={shareChartType}
+            shareTopN={shareTopN}
+            onChangeShareMetric={(m) => {
+              setShareMetric(m);
+              if (m === "memory") setShareRankBy("maxPeakMemBytes");
+              else if (shareRankBy === "maxPeakMemBytes") {
+                setShareRankBy(m === "time" ? "totalTimeMs" : "totalCpuMs");
+              }
+            }}
+            onChangeShareRankBy={setShareRankBy}
+            onChangeShareChartType={setShareChartType}
+            onChangeShareTopN={setShareTopN}
+            onRefreshShare={shareQuery.reload}
+            onOpenShareTemplate={openTemplateFromShare}
+          />
+        ) : (
+          <ExplainWorkspace
+            agent={agent}
+            dorisConn={dorisConn}
+            dorisConfigured={dorisConfigured}
+            onOpenDoris={openDorisModal}
+            sql={explainSql}
+            onChangeSql={setExplainSql}
           />
         )}
-        {ready && !isCoi && (
-          <Alert
-            type="warning"
-            message="Performance warning"
-            description={
-              <Text style={{ whiteSpace: "pre-wrap" }}>
-                crossOriginIsolated is disabled. DuckDB threads may be unavailable and import can be
-                slower.
-                {"\n"}For local dev, restart `npm run dev`.
-                {"\n"}For production, serve with COOP/COEP headers.
-              </Text>
-            }
-            showIcon
-            style={{ marginBottom: 12 }}
-          />
-        )}
-
-        {activeTab !== "explain" ? (
-          <>
-            <ImportCard
-              ready={ready}
-              datasetId={datasetId}
-              importing={importing}
-              importProgress={importProgress}
-              dorisConfigured={dorisConfigured}
-              onOpenDoris={openDorisModal}
-              onOpenDorisImport={openDorisImport}
-              onImport={runImport}
-              onCancel={() => void client.cancelCurrentTask().catch(() => undefined)}
-            />
-
-            <FiltersCard
-              datasetId={datasetId}
-              importing={importing}
-              overview={overviewQuery.data}
-              draft={filtersDraft}
-              onPatchDraft={patchFiltersDraft}
-              onApply={() => setFilters(filtersDraft)}
-              onSetBoth={setFiltersBoth}
-            />
-          </>
-        ) : null}
-
-        <Tabs
-          centered
-          activeKey={activeTab}
-          onChange={(k) => setTab(k as TabKey)}
-          items={[
-            {
-              key: "overview",
-              label: "Overview",
-              children: (
-                <OverviewTab
-                  datasetId={datasetId}
-                  importing={importing}
-                  loading={overviewQuery.loading}
-                  overview={overviewQuery.data}
-                  onRefresh={overviewQuery.reload}
-                  onPatchFilters={patchFiltersBoth}
-                  onJumpToTopSqlByTable={(tableName) => {
-                    setTopSqlSearch(tableName);
-                    setTab("topSql");
-                  }}
-                />
-              ),
-            },
-            {
-              key: "topSql",
-              label: "TopSQL",
-              children: (
-                <TopSqlTab
-                  datasetId={datasetId}
-                  importing={importing}
-                  loading={topSqlQuery.loading}
-                  rows={topSqlQuery.data}
-                  search={topSqlSearch}
-                  onChangeSearch={setTopSqlSearch}
-                  onRefresh={topSqlQuery.reload}
-                  onOpenTemplate={openTemplateFromTopSql}
-                />
-              ),
-            },
-            {
-              key: "share",
-              label: "Share",
-              children: (
-                <ShareTab
-                  datasetId={datasetId}
-                  importing={importing}
-                  loading={shareQuery.loading}
-                  rows={shareQuery.data}
-                  metric={shareMetric}
-                  rankBy={shareRankBy}
-                  chartType={shareChartType}
-                  topN={shareTopN}
-                  onMetricChange={(m) => {
-                    setShareMetric(m);
-                    if (m === "memory") setShareRankBy("maxPeakMemBytes");
-                    else if (shareRankBy === "maxPeakMemBytes")
-                      setShareRankBy(m === "time" ? "totalTimeMs" : "totalCpuMs");
-                  }}
-                  onRankByChange={setShareRankBy}
-                  onChartTypeChange={setShareChartType}
-                  onTopNChange={setShareTopN}
-                  onRefresh={shareQuery.reload}
-                  onOpenTemplate={openTemplateFromShare}
-                />
-              ),
-            },
-            {
-              key: "explain",
-              label: "Explain",
-              children: (
-                <ExplainTab
-                  agent={agent}
-                  dorisConn={dorisConn}
-                  dorisConfigured={dorisConfigured}
-                  onOpenDoris={openDorisModal}
-                  sql={explainSql}
-                  onChangeSql={setExplainSql}
-                />
-              ),
-            },
-          ]}
-        />
-      </Content>
+      </DiagnosticsShell>
 
       <TemplateDetailDrawer
         open={templateDrawer != null}
@@ -391,7 +259,6 @@ export default function App(): JSX.Element {
         datasetId={datasetId}
         template={templateDrawer}
         filters={filters}
-        onExplainSql={openExplainWithSql}
       />
 
       <DorisConnectionModal
@@ -415,6 +282,6 @@ export default function App(): JSX.Element {
         importing={importing}
         onImport={runImport}
       />
-    </Layout>
+    </>
   );
 }

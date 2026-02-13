@@ -9,50 +9,10 @@ import type {
 } from "../db/client/protocol";
 import type { AsyncData } from "../utils/useAsync";
 import { useAsyncData } from "../utils/useAsync";
-
-export type TabKey = "overview" | "topSql" | "share" | "explain";
+import type { AuditTabKey } from "./diagnosticsNavigation";
 
 export function toErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-function parseTabFromSearch(search: string): TabKey | null {
-  const tab = new URLSearchParams(search).get("tab");
-  return tab === "overview" || tab === "topSql" || tab === "share" || tab === "explain"
-    ? tab
-    : null;
-}
-
-function pushTabToUrl(tab: TabKey): void {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.searchParams.set("tab", tab);
-  window.history.pushState({}, "", url.toString());
-}
-
-export function useTabState(defaultTab: TabKey = "overview"): {
-  activeTab: TabKey;
-  setTab: (tab: TabKey) => void;
-} {
-  const [activeTab, setActiveTab] = useState<TabKey>(defaultTab);
-
-  const setTab = useCallback((tab: TabKey) => {
-    setActiveTab(tab);
-    pushTabToUrl(tab);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const syncTabFromUrl = () => {
-      const tab = parseTabFromSearch(window.location.search);
-      if (tab) setActiveTab(tab);
-    };
-    syncTabFromUrl();
-    window.addEventListener("popstate", syncTabFromUrl);
-    return () => window.removeEventListener("popstate", syncTabFromUrl);
-  }, []);
-
-  return { activeTab, setTab };
 }
 
 export function useDuckDbSession(
@@ -61,7 +21,6 @@ export function useDuckDbSession(
 ): {
   ready: boolean;
   datasetId: string | null;
-  createDataset: (name: string) => Promise<string>;
   retryInit: () => void;
 } {
   const [ready, setReady] = useState(false);
@@ -70,16 +29,6 @@ export function useDuckDbSession(
   const [initToken, bumpInitToken] = useReducer((x: number) => x + 1, 0);
   const initSeqRef = useRef(0);
   const createSeqRef = useRef(0);
-
-  const createDataset = useCallback(
-    async (name: string) => {
-      const seq = ++createSeqRef.current;
-      const r = await client.createDataset(name);
-      if (seq === createSeqRef.current) setDatasetId(r.datasetId);
-      return r.datasetId;
-    },
-    [client]
-  );
 
   const retryInit = useCallback(() => {
     setError(null);
@@ -100,7 +49,7 @@ export function useDuckDbSession(
         if (seq !== initSeqRef.current) return;
         const message = toErrorMessage(e);
         if (message.toLowerCase().includes("timed out") && message.includes("type=init")) {
-          setError("DuckDB initialization timed out. Click Retry or reload the page.");
+          setError("Local analysis initialization timed out. Click Retry or reload the page.");
           return;
         }
         setError(message);
@@ -109,17 +58,27 @@ export function useDuckDbSession(
 
   useEffect(() => {
     if (!ready || datasetId) return;
-    createDataset("session").catch((e) => setError(toErrorMessage(e)));
-  }, [createDataset, datasetId, ready, setError]);
+    const seq = ++createSeqRef.current;
+    client
+      .createDataset("session")
+      .then((r) => {
+        if (seq !== createSeqRef.current) return;
+        setDatasetId(r.datasetId);
+      })
+      .catch((e) => {
+        if (seq !== createSeqRef.current) return;
+        setError(toErrorMessage(e));
+      });
+  }, [client, datasetId, ready, setError]);
 
-  return { ready, datasetId, createDataset, retryInit };
+  return { ready, datasetId, retryInit };
 }
 
 export function useDatasetQueries(params: {
   client: DbClient;
   datasetId: string | null;
   importing: boolean;
-  activeTab: TabKey;
+  activeTab: AuditTabKey | null;
   filters: QueryFilters;
   shareTopN: number;
   shareRankBy: ShareRankBy;

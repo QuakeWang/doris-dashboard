@@ -1,11 +1,15 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"strings"
+	"time"
 )
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -16,11 +20,51 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{
-		"ok":    false,
-		"error": map[string]any{"message": message},
+func writeData(w http.ResponseWriter, r *http.Request, status int, data any) {
+	traceID := resolveTraceID(r)
+	writeEnvelope(w, status, traceID, map[string]any{
+		"ok":      true,
+		"data":    data,
+		"traceId": traceID,
 	})
+}
+
+func writeErrorWithRequest(w http.ResponseWriter, r *http.Request, status int, message string) {
+	traceID := resolveTraceID(r)
+	writeEnvelope(w, status, traceID, map[string]any{
+		"ok":      false,
+		"error":   map[string]any{"message": message},
+		"traceId": traceID,
+	})
+}
+
+func writeEnvelope(w http.ResponseWriter, status int, traceID string, body map[string]any) {
+	w.Header().Set("X-Trace-Id", traceID)
+	writeJSON(w, status, body)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeErrorWithRequest(w, nil, status, message)
+}
+
+func resolveTraceID(r *http.Request) string {
+	if r != nil {
+		for _, key := range []string{"X-Trace-Id", "X-Request-Id"} {
+			v := strings.TrimSpace(r.Header.Get(key))
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return generateTraceID()
+}
+
+func generateTraceID() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return strings.ReplaceAll(time.Now().UTC().Format("20060102T150405.000000000"), ".", "")
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) error {

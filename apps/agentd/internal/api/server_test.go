@@ -14,7 +14,8 @@ import (
 )
 
 type errBody struct {
-	OK    bool `json:"ok"`
+	OK      bool   `json:"ok"`
+	TraceID string `json:"traceId"`
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -62,6 +63,9 @@ func assertErrContains(t *testing.T, w *httptest.ResponseRecorder, status int, w
 	body := decodeErrBody(t, w)
 	if body.OK {
 		t.Fatalf("unexpected ok=true")
+	}
+	if body.TraceID == "" {
+		t.Fatalf("missing traceId")
 	}
 	if !strings.Contains(body.Error.Message, wantSubstr) {
 		t.Fatalf("unexpected error message: %q", body.Error.Message)
@@ -229,6 +233,9 @@ func TestExplainTreeCallsRunner(t *testing.T) {
 	if gotMode != "tree" {
 		t.Fatalf("unexpected mode: %q", gotMode)
 	}
+	if !strings.Contains(w.Body.String(), `"data":`) {
+		t.Fatalf("unexpected response body (missing data envelope): %q", w.Body.String())
+	}
 	if !strings.Contains(w.Body.String(), `"rawText":"[00]:[0: ResultSink]||[Fragment: 0]||"`) {
 		t.Fatalf("unexpected response body: %q", w.Body.String())
 	}
@@ -264,6 +271,9 @@ func TestExplainPlanCallsRunner(t *testing.T) {
 	if gotMode != "plan" {
 		t.Fatalf("unexpected mode: %q", gotMode)
 	}
+	if !strings.Contains(w.Body.String(), `"data":`) {
+		t.Fatalf("unexpected response body (missing data envelope): %q", w.Body.String())
+	}
 	if !strings.Contains(w.Body.String(), `"rawText":"PLAN FRAGMENT 0"`) {
 		t.Fatalf("unexpected response body: %q", w.Body.String())
 	}
@@ -287,6 +297,9 @@ func TestListDatabasesCallsRunner(t *testing.T) {
 	}
 	if gotCfg.Database != "tpch" {
 		t.Fatalf("unexpected database: %q", gotCfg.Database)
+	}
+	if !strings.Contains(w.Body.String(), `"data":`) {
+		t.Fatalf("unexpected response body (missing data envelope): %q", w.Body.String())
 	}
 	if !strings.Contains(w.Body.String(), `"databases":["db1","db2"]`) {
 		t.Fatalf("unexpected response body: %q", w.Body.String())
