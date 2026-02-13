@@ -61,7 +61,7 @@ export default function App(): JSX.Element {
   const isCoi = typeof window !== "undefined" && window.crossOriginIsolated === true;
 
   const [error, setError] = useState<string | null>(null);
-  const { ready, datasetId, retryInit } = useDuckDbSession(client, setError);
+  const { ready, datasetId, retryInit, retryCreateDataset } = useDuckDbSession(client, setError);
 
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -188,6 +188,8 @@ export default function App(): JSX.Element {
         onOpenDoris={openDorisModal}
         error={error}
         onRetryInit={retryInit}
+        canRetrySession={ready && !datasetId}
+        onRetrySession={retryCreateDataset}
         onDismissError={() => setError(null)}
       >
         {activeModule === "audit" ? (

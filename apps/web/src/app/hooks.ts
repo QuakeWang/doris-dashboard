@@ -22,11 +22,13 @@ export function useDuckDbSession(
   ready: boolean;
   datasetId: string | null;
   retryInit: () => void;
+  retryCreateDataset: () => void;
 } {
   const [ready, setReady] = useState(false);
   const [datasetId, setDatasetId] = useState<string | null>(null);
 
   const [initToken, bumpInitToken] = useReducer((x: number) => x + 1, 0);
+  const [createToken, bumpCreateToken] = useReducer((x: number) => x + 1, 0);
   const initSeqRef = useRef(0);
   const createSeqRef = useRef(0);
 
@@ -34,6 +36,11 @@ export function useDuckDbSession(
     setError(null);
     setReady(false);
     bumpInitToken();
+  }, [setError]);
+
+  const retryCreateDataset = useCallback(() => {
+    setError(null);
+    bumpCreateToken();
   }, [setError]);
 
   useEffect(() => {
@@ -69,9 +76,9 @@ export function useDuckDbSession(
         if (seq !== createSeqRef.current) return;
         setError(toErrorMessage(e));
       });
-  }, [client, datasetId, ready, setError]);
+  }, [client, createToken, datasetId, ready, setError]);
 
-  return { ready, datasetId, retryInit };
+  return { ready, datasetId, retryInit, retryCreateDataset };
 }
 
 export function useDatasetQueries(params: {

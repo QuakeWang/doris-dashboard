@@ -15,6 +15,8 @@ export interface DiagnosticsShellProps {
   onOpenDoris: () => void;
   error: string | null;
   onRetryInit: () => void;
+  canRetrySession?: boolean;
+  onRetrySession?: () => void;
   onDismissError: () => void;
   children: ReactNode;
 }
@@ -29,6 +31,8 @@ export default function DiagnosticsShell(props: DiagnosticsShellProps): JSX.Elem
     onOpenDoris,
     error,
     onRetryInit,
+    canRetrySession = false,
+    onRetrySession,
     onDismissError,
     children,
   } = props;
@@ -69,6 +73,12 @@ export default function DiagnosticsShell(props: DiagnosticsShellProps): JSX.Elem
                     }}
                   >
                     Reload
+                  </Button>
+                </Space>
+              ) : canRetrySession && onRetrySession ? (
+                <Space>
+                  <Button size="small" onClick={onRetrySession}>
+                    Retry Session
                   </Button>
                 </Space>
               ) : null
