@@ -85,7 +85,7 @@ func parseConnConfig(c *dorisConnection) (doris.ConnConfig, error) {
 
 func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method != method {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeErrorWithRequest(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return false
 	}
 	return true
@@ -93,16 +93,20 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 
 func readJSONOrWriteError(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if err := readJSON(w, r, dst); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return false
 	}
 	return true
 }
 
-func parseConnConfigOrWriteError(w http.ResponseWriter, c *dorisConnection) (doris.ConnConfig, bool) {
+func parseConnConfigOrWriteError(
+	w http.ResponseWriter,
+	r *http.Request,
+	c *dorisConnection,
+) (doris.ConnConfig, bool) {
 	cfg, err := parseConnConfig(c)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return doris.ConnConfig{}, false
 	}
 	return cfg, true
@@ -217,7 +221,7 @@ func withLocalOnly(next http.Handler) http.Handler {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		ip := net.ParseIP(host)
 		if err != nil || ip == nil || !ip.IsLoopback() {
-			writeError(w, http.StatusForbidden, "loopback only")
+			writeErrorWithRequest(w, r, http.StatusForbidden, "loopback only")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -228,7 +232,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && !isAllowedOrigin(origin) {
-			writeError(w, http.StatusForbidden, "origin not allowed")
+			writeErrorWithRequest(w, r, http.StatusForbidden, "origin not allowed")
 			return
 		}
 		if origin != "" {
@@ -264,7 +268,7 @@ func (s *Server) handleDorisConnectionTest(w http.ResponseWriter, r *http.Reques
 	if !readJSONOrWriteError(w, r, &req) {
 		return
 	}
-	cfg, ok := parseConnConfigOrWriteError(w, req.Connection)
+	cfg, ok := parseConnConfigOrWriteError(w, r, req.Connection)
 	if !ok {
 		return
 	}
@@ -274,11 +278,10 @@ func (s *Server) handleDorisConnectionTest(w http.ResponseWriter, r *http.Reques
 	applyReadWriteTimeout(&cfg, 15*time.Second)
 	version, err := s.queryVersion(ctx, cfg)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
+	writeData(w, r, http.StatusOK, map[string]any{
 		"version": version,
 	})
 }
@@ -293,7 +296,7 @@ func (s *Server) handleDorisDatabases(w http.ResponseWriter, r *http.Request) {
 	if !readJSONOrWriteError(w, r, &req) {
 		return
 	}
-	cfg, ok := parseConnConfigOrWriteError(w, req.Connection)
+	cfg, ok := parseConnConfigOrWriteError(w, r, req.Connection)
 	if !ok {
 		return
 	}
@@ -303,11 +306,10 @@ func (s *Server) handleDorisDatabases(w http.ResponseWriter, r *http.Request) {
 	applyReadWriteTimeout(&cfg, 20*time.Second)
 	databases, err := s.listDatabases(ctx, cfg)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
+	writeData(w, r, http.StatusOK, map[string]any{
 		"databases": databases,
 	})
 }
@@ -324,16 +326,16 @@ func (s *Server) handleDorisAuditLogExport(w http.ResponseWriter, r *http.Reques
 	if !readJSONOrWriteError(w, r, &req) {
 		return
 	}
-	cfg, ok := parseConnConfigOrWriteError(w, req.Connection)
+	cfg, ok := parseConnConfigOrWriteError(w, r, req.Connection)
 	if !ok {
 		return
 	}
 	if req.LookbackSeconds <= 0 {
-		writeError(w, http.StatusBadRequest, "lookbackSeconds must be positive")
+		writeErrorWithRequest(w, r, http.StatusBadRequest, "lookbackSeconds must be positive")
 		return
 	}
 	if req.Limit <= 0 {
-		writeError(w, http.StatusBadRequest, "limit must be positive")
+		writeErrorWithRequest(w, r, http.StatusBadRequest, "limit must be positive")
 		return
 	}
 
@@ -349,7 +351,7 @@ func (s *Server) handleDorisAuditLogExport(w http.ResponseWriter, r *http.Reques
 	if err := s.exportAuditLog(ctx, cfg, req.LookbackSeconds, req.Limit, cw); err != nil {
 		if cw.n == 0 {
 			w.Header().Del("Content-Disposition")
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
 		// Avoid silently importing a truncated TSV.
@@ -369,13 +371,13 @@ func (s *Server) handleDorisExplain(w http.ResponseWriter, r *http.Request) {
 	if !readJSONOrWriteError(w, r, &req) {
 		return
 	}
-	cfg, ok := parseConnConfigOrWriteError(w, req.Connection)
+	cfg, ok := parseConnConfigOrWriteError(w, r, req.Connection)
 	if !ok {
 		return
 	}
 	sqlText := strings.TrimSpace(req.SQL)
 	if sqlText == "" {
-		writeError(w, http.StatusBadRequest, "sql is required")
+		writeErrorWithRequest(w, r, http.StatusBadRequest, "sql is required")
 		return
 	}
 
@@ -384,17 +386,16 @@ func (s *Server) handleDorisExplain(w http.ResponseWriter, r *http.Request) {
 	applyReadWriteTimeout(&cfg, 20*time.Second)
 	mode, err := normalizeExplainMode(req.Mode)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	rawText, err := s.explain(ctx, cfg, sqlText, mode)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
+	writeData(w, r, http.StatusOK, map[string]any{
 		"rawText": rawText,
 	})
 }

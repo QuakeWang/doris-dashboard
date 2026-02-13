@@ -51,7 +51,6 @@ export interface TemplateDetailDrawerProps {
   datasetId: string | null;
   template: TemplateRef | null;
   filters: QueryFilters;
-  onExplainSql?: (sql: string) => void;
 }
 
 type SeriesMetric = "execCount" | "totalCpuMs" | "totalTimeMs";
@@ -134,7 +133,7 @@ const DIM_COLUMNS: ColumnsType<DimensionTopRow> = [
 ];
 
 export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): JSX.Element {
-  const { open, onClose, client, datasetId, template, filters, onExplainSql } = props;
+  const { open, onClose, client, datasetId, template, filters } = props;
 
   const [bucketSeconds, setBucketSeconds] = useState(300);
   const [seriesMetric, setSeriesMetric] = useState<SeriesMetric>("totalCpuMs");
@@ -240,29 +239,14 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
       {
         title: "Actions",
         key: "actions",
-        width: 120,
+        width: 68,
         fixed: "right",
         render: (_: unknown, r: QuerySampleRow) => (
-          <Space size={4}>
-            <CopyIconButton text={r.stmtRaw ?? ""} tooltip="Copy SQL" ariaLabel="Copy SQL" />
-            <Button
-              type="link"
-              size="small"
-              className="dd-link-btn"
-              disabled={!onExplainSql || !r.stmtRaw}
-              onClick={() => {
-                if (!r.stmtRaw) return;
-                onExplainSql?.(r.stmtRaw);
-                onClose();
-              }}
-            >
-              Explain
-            </Button>
-          </Space>
+          <CopyIconButton text={r.stmtRaw ?? ""} tooltip="Copy SQL" ariaLabel="Copy SQL" />
         ),
       },
     ],
-    [onClose, onExplainSql]
+    []
   );
 
   return (
