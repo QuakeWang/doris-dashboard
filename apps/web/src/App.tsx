@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentClient } from "./agent/agentClient";
 import { useDiagnosticsNavigation } from "./app/diagnosticsNavigation";
 import { useDuckDbSession } from "./app/hooks";
@@ -13,7 +13,19 @@ import { DbClient } from "./db/client/dbClient";
 export default function App(): JSX.Element {
   const client = useMemo(() => new DbClient(), []);
   const agent = useMemo(() => new AgentClient(), []);
-  useEffect(() => () => client.dispose(), [client]);
+  const disposeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (disposeTimerRef.current != null) {
+      clearTimeout(disposeTimerRef.current);
+      disposeTimerRef.current = null;
+    }
+    return () => {
+      disposeTimerRef.current = setTimeout(() => {
+        client.dispose();
+        disposeTimerRef.current = null;
+      }, 0);
+    };
+  }, [client]);
   const isCoi = typeof window !== "undefined" && window.crossOriginIsolated === true;
   const doris = useDorisConnectionState();
 
