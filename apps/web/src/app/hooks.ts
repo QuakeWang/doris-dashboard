@@ -89,27 +89,19 @@ export function useDatasetQueries(params: {
   filters: QueryFilters;
   shareTopN: number;
   shareRankBy: ShareRankBy;
-  setError: (value: string | null) => void;
 }): {
   overviewQuery: AsyncData<OverviewResult | null>;
   topSqlQuery: AsyncData<TopSqlRow[]>;
   shareQuery: AsyncData<ShareRow[]>;
 } {
-  const { client, datasetId, importing, activeTab, filters, shareTopN, shareRankBy, setError } =
-    params;
+  const { client, datasetId, importing, activeTab, filters, shareTopN, shareRankBy } = params;
 
   const canQuery = !!datasetId && !importing;
-  const queryOptions = { keepDataOnError: true, onError: setError };
-
-  const runDatasetQuery = <T>(fallback: T, fn: (id: string) => Promise<T>): Promise<T> => {
-    if (!datasetId) return Promise.resolve(fallback);
-    setError(null);
-    return fn(datasetId);
-  };
+  const queryOptions = { keepDataOnError: true };
 
   const overviewQuery = useAsyncData<OverviewResult | null>(
     activeTab === "overview" && canQuery,
-    () => runDatasetQuery(null, (id) => client.queryOverview(id, filters)),
+    () => (datasetId ? client.queryOverview(datasetId, filters) : Promise.resolve(null)),
     [activeTab, client, datasetId, filters, importing],
     null,
     queryOptions
@@ -117,7 +109,7 @@ export function useDatasetQueries(params: {
 
   const topSqlQuery = useAsyncData<TopSqlRow[]>(
     activeTab === "topSql" && canQuery,
-    () => runDatasetQuery([], (id) => client.queryTopSql(id, 50, filters)),
+    () => (datasetId ? client.queryTopSql(datasetId, 50, filters) : Promise.resolve([])),
     [activeTab, client, datasetId, filters, importing],
     [],
     queryOptions
@@ -125,7 +117,10 @@ export function useDatasetQueries(params: {
 
   const shareQuery = useAsyncData<ShareRow[]>(
     activeTab === "share" && canQuery,
-    () => runDatasetQuery([], (id) => client.queryShare(id, shareTopN, shareRankBy, filters)),
+    () =>
+      datasetId
+        ? client.queryShare(datasetId, shareTopN, shareRankBy, filters)
+        : Promise.resolve([]),
     [activeTab, client, datasetId, filters, importing, shareRankBy, shareTopN],
     [],
     queryOptions

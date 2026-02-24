@@ -2,18 +2,18 @@ import type { DimensionTopRow, QueryFilters } from "../../client/protocol";
 import { reply } from "../messaging";
 
 export type QueryResult = { toArray: () => unknown[] };
-export type QueryRow = Record<string, any>;
+export type QueryRow = Record<string, unknown>;
 
 export function replyOk(requestId: string, result: unknown): void {
   reply({ type: "response", requestId, ok: true, result });
 }
 
-export function toRows(res: QueryResult): QueryRow[] {
-  return res.toArray() as QueryRow[];
+export function toRows<T extends QueryRow = QueryRow>(res: QueryResult): T[] {
+  return res.toArray() as T[];
 }
 
 export function num(value: unknown, fallback = 0): number {
-  return Number((value as any) ?? fallback);
+  return value == null ? fallback : Number(value);
 }
 
 export function numOrNull(value: unknown): number | null {
@@ -21,7 +21,7 @@ export function numOrNull(value: unknown): number | null {
 }
 
 export function str(value: unknown, fallback = ""): string {
-  return String((value as any) ?? fallback);
+  return value == null ? fallback : String(value);
 }
 
 export function strOrNull(value: unknown): string | null {
@@ -72,7 +72,13 @@ export function buildWhere(
 }
 
 export function mapDimRows(res: QueryResult): DimensionTopRow[] {
-  return toRows(res).map((r) => ({
+  type DimAggRow = {
+    name: unknown;
+    exec_count: unknown;
+    total_cpu_ms: unknown;
+    total_time_ms: unknown;
+  };
+  return toRows<DimAggRow>(res).map((r) => ({
     name: str(r.name),
     execCount: num(r.exec_count),
     totalCpuMs: num(r.total_cpu_ms),

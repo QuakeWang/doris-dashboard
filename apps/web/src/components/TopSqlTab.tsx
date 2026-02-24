@@ -1,4 +1,4 @@
-import { Button, Card, Input, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Input, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo } from "react";
 import type { TopSqlRow } from "../db/client/protocol";
@@ -12,6 +12,7 @@ export interface TopSqlTabProps {
   datasetId: string | null;
   importing: boolean;
   loading: boolean;
+  error: string | null;
   rows: TopSqlRow[];
   search: string;
   onChangeSearch: (value: string) => void;
@@ -20,8 +21,17 @@ export interface TopSqlTabProps {
 }
 
 export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
-  const { datasetId, importing, loading, rows, search, onChangeSearch, onRefresh, onOpenTemplate } =
-    props;
+  const {
+    datasetId,
+    importing,
+    loading,
+    error,
+    rows,
+    search,
+    onChangeSearch,
+    onRefresh,
+    onOpenTemplate,
+  } = props;
 
   const columns: ColumnsType<TopSqlRow> = useMemo(
     () => [
@@ -145,6 +155,15 @@ export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
         </Space>
       }
     >
+      {error ? (
+        <Alert
+          type="error"
+          message="Query failed"
+          description={error}
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       <Table<TopSqlRow>
         rowKey={(r) => r.templateHash}
         size="small"

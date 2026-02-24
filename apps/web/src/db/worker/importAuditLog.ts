@@ -21,6 +21,23 @@ const LARGE_FILE_CHUNKED_TXN_THRESHOLD_BYTES = 256 * 1024 * 1024;
 const MIN_ARROW_INSERT_ROWS = 200;
 
 type AuditLogInputFormat = "feAuditLog" | "auditLogOutfileCsv";
+type PreparedStatement = {
+  query: (...params: unknown[]) => Promise<unknown>;
+  close: () => Promise<void>;
+};
+
+function errorMessageOf(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+function mergeMainAndFinalizeError(mainError: unknown, finalizeError: Error): Error {
+  const main = toError(mainError);
+  return new Error(`${main.message}\nFinalize failure: ${finalizeError.message}`);
+}
 
 async function detectAuditLogInputFormat(file: File): Promise<{
   format: AuditLogInputFormat;
@@ -118,14 +135,12 @@ export async function handleImportAuditLog(
   abortController?.abort();
   abortController = new AbortController();
   const signal = abortController.signal;
-
-  await dropAuditLogIndexes(c);
-
-  for (const table of ["audit_log_records", "audit_sql_templates_stripped"])
-    await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
-
-  const insertStmt = await c.prepare(RECORD_INSERT_SQL);
-  const insertTplStmt = await c.prepare(STRIPPED_TPL_INSERT_SQL);
+  let indexesDropped = false;
+  let mainError: unknown = null;
+  let insertStmt: PreparedStatement | null = null;
+  let insertTplStmt: PreparedStatement | null = null;
+  let singleTxnStarted = false;
+  let finalizeError: Error | null = null;
 
   const recordArrays = RECORD_COLS.map(() => [] as unknown[]);
   const strippedTplArrays = STRIPPED_TPL_COLS.map(() => [] as unknown[]);
@@ -164,6 +179,23 @@ export async function handleImportAuditLog(
     });
   };
 
+  const rollbackWithPreservedError = async (context: string, originalError: unknown) => {
+    try {
+      await c.query("ROLLBACK");
+    } catch (rollbackError) {
+      log(
+        `${context} rollback failed: ${errorMessageOf(rollbackError)} (original error: ${errorMessageOf(
+          originalError
+        )})`
+      );
+    }
+  };
+
+  const deleteDatasetRows = async () => {
+    for (const table of ["audit_log_records", "audit_sql_templates_stripped"])
+      await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
+  };
+
   const insertRecordRange = async (start: number, end: number): Promise<number> => {
     const count = end - start;
     if (count <= 0) return 0;
@@ -186,7 +218,7 @@ export async function handleImportAuditLog(
         let inserted = 0;
         for (let r = start; r < end; r++) {
           if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-          await insertStmt.query(...(recordArrays.map((a) => a[r]) as any[]));
+          await insertStmt!.query(...recordArrays.map((a) => a[r]));
           inserted++;
         }
         return inserted;
@@ -226,7 +258,7 @@ export async function handleImportAuditLog(
       if (count <= MIN_ARROW_INSERT_ROWS) {
         for (let r = start; r < end; r++) {
           if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-          await insertTplStmt.query(...(strippedTplArrays.map((a) => a[r]) as any[]));
+          await insertTplStmt!.query(...strippedTplArrays.map((a) => a[r]));
         }
         return;
       }
@@ -251,13 +283,26 @@ export async function handleImportAuditLog(
       await flushRecords();
       if (!useSingleTransaction) await c.query("COMMIT");
     } catch (e) {
-      if (!useSingleTransaction) await c.query("ROLLBACK");
+      if (!useSingleTransaction) {
+        await rollbackWithPreservedError("Chunk transaction", e);
+      }
       throw e;
     }
   };
 
-  if (useSingleTransaction) await c.query("BEGIN TRANSACTION");
   try {
+    await dropAuditLogIndexes(c);
+    indexesDropped = true;
+
+    await deleteDatasetRows();
+
+    insertStmt = (await c.prepare(RECORD_INSERT_SQL)) as PreparedStatement;
+    insertTplStmt = (await c.prepare(STRIPPED_TPL_INSERT_SQL)) as PreparedStatement;
+
+    if (useSingleTransaction) {
+      await c.query("BEGIN TRANSACTION");
+      singleTxnStarted = true;
+    }
     const input = await detectAuditLogInputFormat(file);
     const onProgress = (p: { bytesRead: number }) => {
       bytesRead = p.bytesRead;
@@ -356,31 +401,61 @@ export async function handleImportAuditLog(
     }
     await flushBatch();
 
-    if (useSingleTransaction) await c.query("COMMIT");
-    await createAuditLogIndexes(c);
+    if (useSingleTransaction && singleTxnStarted) {
+      await c.query("COMMIT");
+      singleTxnStarted = false;
+    }
   } catch (e) {
-    if (useSingleTransaction) await c.query("ROLLBACK");
+    mainError = e;
+    if (useSingleTransaction && singleTxnStarted) {
+      singleTxnStarted = false;
+      await rollbackWithPreservedError("Single transaction", e);
+    }
     if (!useSingleTransaction) {
       try {
         log("Import failed, cleaning up partially committed data for this dataset.");
-        for (const table of ["audit_log_records", "audit_sql_templates_stripped"]) {
-          await queryWithParams(c, `DELETE FROM ${table} WHERE dataset_id = ?`, [datasetId]);
-        }
-        await createAuditLogIndexes(c);
+        await deleteDatasetRows();
       } catch (cleanupErr) {
-        log(
-          `Cleanup after failed import skipped: ${
-            cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
-          }`
-        );
+        log(`Cleanup after failed import skipped: ${errorMessageOf(cleanupErr)}`);
       }
     }
-    throw e;
   } finally {
-    await insertStmt.close();
-    await insertTplStmt.close();
+    const captureFinalizeError = (context: string, err: unknown) => {
+      const message = errorMessageOf(err);
+      if (!finalizeError) {
+        finalizeError = new Error(`${context}: ${message}`);
+        if (mainError) {
+          log(`${context} after failed import: ${message}`);
+        }
+        return;
+      }
+      log(`${context} skipped: ${message}`);
+    };
+
+    for (const [stmt, context] of [
+      [insertStmt, "Closing record insert statement"],
+      [insertTplStmt, "Closing template insert statement"],
+    ] as const) {
+      if (!stmt) continue;
+      try {
+        await stmt.close();
+      } catch (closeErr) {
+        captureFinalizeError(context, closeErr);
+      }
+    }
+    if (indexesDropped) {
+      try {
+        await createAuditLogIndexes(c, mainError != null);
+      } catch (rebuildErr) {
+        captureFinalizeError("Rebuilding audit log indexes", rebuildErr);
+      }
+    }
     maybeEmitProgress(true);
   }
+
+  if (mainError && finalizeError) throw mergeMainAndFinalizeError(mainError, finalizeError);
+  if (mainError) throw toError(mainError);
+  if (finalizeError) throw finalizeError;
 
   reply({ type: "response", requestId, ok: true, result: { recordsInserted, badRecords } });
 }

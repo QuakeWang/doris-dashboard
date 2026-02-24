@@ -14,6 +14,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
+import type { EChartsOption } from "echarts";
 import { useEffect, useMemo, useState } from "react";
 import type { DbClient } from "../db/client/dbClient";
 import type {
@@ -74,6 +75,22 @@ function formatBucketLabel(seconds: number): string {
 }
 
 const renderNullableText = (v: string | null) => v ?? "-";
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function dataIndexFrom(value: unknown): number {
+  const obj = asObject(value);
+  const index = Number(obj?.dataIndex ?? -1);
+  return Number.isFinite(index) ? index : -1;
+}
+
+function numericDataFrom(value: unknown): number {
+  const obj = asObject(value);
+  return Number(obj?.data ?? 0);
+}
 
 const SAMPLE_COLUMNS: ColumnsType<QuerySampleRow> = [
   {
@@ -185,7 +202,7 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
     if (seriesBucketSeconds !== bucketSeconds) setBucketSeconds(seriesBucketSeconds);
   }, [bucketSeconds, enabled, seriesBucketSeconds]);
 
-  const seriesOption = useMemo(() => {
+  const seriesOption = useMemo<EChartsOption | null>(() => {
     if (!series || series.bucketStarts.length === 0) return null;
     const xLabels = series.bucketStarts.map((t) => dayjs(t).format("MM-DD HH:mm"));
     const values =
@@ -204,11 +221,11 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
     return {
       tooltip: {
         trigger: "axis",
-        formatter: (params: any) => {
+        formatter: (params: unknown) => {
           const p = Array.isArray(params) ? params[0] : params;
-          const i = Number(p?.dataIndex ?? -1);
+          const i = dataIndexFrom(p);
           const bucket = series.bucketStarts[i];
-          const v = Number(p?.data ?? 0);
+          const v = numericDataFrom(p);
           return `bucket: ${bucket}<br/>value: ${yFormatter(v)}`;
         },
       },
@@ -361,7 +378,7 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                       error={seriesError}
                       isEmpty={!seriesOption}
                     >
-                      <EChart option={seriesOption as any} height={320} />
+                      {seriesOption ? <EChart option={seriesOption} height={320} /> : null}
                     </AsyncContent>
                   </Card>
                 ),

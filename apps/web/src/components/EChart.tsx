@@ -25,7 +25,7 @@ export default function EChart({ option, height = 360, onClick }: EChartProps): 
   useEffect(() => {
     if (!containerRef.current) return;
     if (!themeRegistered) {
-      echarts.registerTheme(CATPPUCCIN_ECHARTS_THEME_NAME, CATPPUCCIN_ECHARTS_THEME as any);
+      echarts.registerTheme(CATPPUCCIN_ECHARTS_THEME_NAME, CATPPUCCIN_ECHARTS_THEME);
       themeRegistered = true;
     }
     const chart = echarts.init(containerRef.current, CATPPUCCIN_ECHARTS_THEME_NAME);

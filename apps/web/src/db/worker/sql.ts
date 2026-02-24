@@ -12,7 +12,7 @@ export async function queryWithParams(
   if (params.length === 0) return await c.query(sql);
   const stmt = await c.prepare(sql);
   try {
-    return await stmt.query(...(params as any[]));
+    return await stmt.query(...params);
   } finally {
     await stmt.close();
   }

@@ -1,5 +1,6 @@
 import { LinkOutlined } from "@ant-design/icons";
 import { Button, Layout, Space, Typography } from "antd";
+import { DIAGNOSTICS_MODULES } from "../app/diagnosticsModules";
 import type { DiagnosticsModule } from "../app/diagnosticsNavigation";
 
 const { Header } = Layout;
@@ -28,24 +29,19 @@ export default function AppHeader(props: AppHeaderProps): JSX.Element {
         borderBottom: "1px solid rgba(88, 91, 112, 0.65)",
       }}
     >
+      <Title level={3} style={{ margin: 0, color: "white" }}>
+        Doris Dashboard
+      </Title>
       <Space>
-        <Title level={3} style={{ margin: 0, color: "white" }}>
-          Doris Dashboard
-        </Title>
-      </Space>
-      <Space>
-        <Button
-          type={activeModule === "audit" ? "primary" : "default"}
-          onClick={() => onSwitchModule("audit")}
-        >
-          Audit
-        </Button>
-        <Button
-          type={activeModule === "explain" ? "primary" : "default"}
-          onClick={() => onSwitchModule("explain")}
-        >
-          Explain
-        </Button>
+        {DIAGNOSTICS_MODULES.map((module) => (
+          <Button
+            key={module.id}
+            type={activeModule === module.id ? "primary" : "default"}
+            onClick={() => onSwitchModule(module.id)}
+          >
+            {module.label}
+          </Button>
+        ))}
         <Button icon={<LinkOutlined />} onClick={onOpenDoris}>
           Doris
         </Button>

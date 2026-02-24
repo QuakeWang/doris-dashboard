@@ -12,6 +12,23 @@ import {
   toRows,
 } from "./common";
 
+type SampleAggRow = {
+  record_id: unknown;
+  event_time_ms: unknown;
+  query_id: unknown;
+  user_name: unknown;
+  db_name: unknown;
+  client_ip: unknown;
+  state: unknown;
+  query_time_ms: unknown;
+  cpu_time_ms: unknown;
+  peak_memory_bytes: unknown;
+  scan_bytes: unknown;
+  scan_rows: unknown;
+  return_rows: unknown;
+  stmt_raw: unknown;
+};
+
 export async function handleQuerySamples(
   requestId: string,
   datasetId: string,
@@ -37,7 +54,7 @@ export async function handleQuerySamples(
     [...where.params, templateId, safeLimit]
   );
 
-  const rows: QuerySampleRow[] = toRows(res).map((r) => {
+  const rows: QuerySampleRow[] = toRows<SampleAggRow>(res).map((r) => {
     const eventTimeMs = numOrNull(r.event_time_ms);
     return {
       recordId: num(r.record_id),

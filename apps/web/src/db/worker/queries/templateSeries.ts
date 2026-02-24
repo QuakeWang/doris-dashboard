@@ -3,6 +3,18 @@ import { ensureDb } from "../engine";
 import { queryWithParams } from "../sql";
 import { buildWhere, num, numOrNull, parseTemplateId, replyOk, toRows } from "./common";
 
+type RangeAggRow = {
+  min_time_ms: unknown;
+  max_time_ms: unknown;
+};
+
+type SeriesAggRow = {
+  bucket_ms: unknown;
+  exec_count: unknown;
+  total_cpu_ms: unknown;
+  total_time_ms: unknown;
+};
+
 const NICE_BUCKET_SECONDS = [
   60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800,
 ] as const;
@@ -41,7 +53,7 @@ export async function handleQueryTemplateSeries(
     `SELECT min(event_time_ms) AS min_time_ms, max(event_time_ms) AS max_time_ms FROM audit_log_records WHERE ${where.whereSql} AND stripped_template_id = ? AND event_time_ms IS NOT NULL;`,
     [...where.params, templateId]
   );
-  const rangeRow = toRows(rangeRes)[0] ?? null;
+  const rangeRow = toRows<RangeAggRow>(rangeRes)[0] ?? null;
   const minMs = numOrNull(rangeRow?.min_time_ms);
   const maxMs = numOrNull(rangeRow?.max_time_ms);
   if (minMs == null || maxMs == null || !Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
@@ -80,7 +92,7 @@ export async function handleQueryTemplateSeries(
     number,
     { execCount: number; totalCpuMs: number; totalTimeMs: number }
   >();
-  for (const r of toRows(seriesRes)) {
+  for (const r of toRows<SeriesAggRow>(seriesRes)) {
     const bucket = num(r.bucket_ms);
     byBucket.set(bucket, {
       execCount: num(r.exec_count),

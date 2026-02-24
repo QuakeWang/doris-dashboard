@@ -1,5 +1,5 @@
 import { ReloadOutlined } from "@ant-design/icons";
-import { Button, Card, Col, Row, Space, Statistic, Table, Tabs, Typography } from "antd";
+import { Alert, Button, Card, Col, Row, Space, Statistic, Table, Tabs, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type {
@@ -63,6 +63,7 @@ export interface OverviewTabProps {
   datasetId: string | null;
   importing: boolean;
   loading: boolean;
+  error: string | null;
   overview: OverviewResult | null;
   onRefresh: () => void;
   onPatchFilters: (patch: Partial<QueryFilters>) => void;
@@ -74,6 +75,7 @@ export default function OverviewTab(props: OverviewTabProps): JSX.Element {
     datasetId,
     importing,
     loading,
+    error,
     overview,
     onRefresh,
     onPatchFilters,
@@ -281,6 +283,15 @@ export default function OverviewTab(props: OverviewTabProps): JSX.Element {
 
   return (
     <Card size="small" title="Overview" extra={refreshButton}>
+      {error ? (
+        <Alert
+          type="error"
+          message="Query failed"
+          description={error}
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       <AsyncContent loading={loading} error={null} isEmpty={!overview}>
         {content}
       </AsyncContent>

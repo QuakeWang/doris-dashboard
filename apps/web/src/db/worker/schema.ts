@@ -24,7 +24,10 @@ export async function dropAuditLogIndexes(c: duckdb.AsyncDuckDBConnection): Prom
   }
 }
 
-export async function createAuditLogIndexes(c: duckdb.AsyncDuckDBConnection): Promise<void> {
+export async function createAuditLogIndexes(
+  c: duckdb.AsyncDuckDBConnection,
+  throwOnError = false
+): Promise<void> {
   try {
     for (const sql of [
       "CREATE INDEX IF NOT EXISTS idx_audit_dataset_time_ms ON audit_log_records(dataset_id, event_time_ms)",
@@ -33,5 +36,6 @@ export async function createAuditLogIndexes(c: duckdb.AsyncDuckDBConnection): Pr
       await c.query(sql);
   } catch (e) {
     log(`CREATE INDEX skipped: ${e instanceof Error ? e.message : String(e)}`);
+    if (throwOnError) throw e;
   }
 }
