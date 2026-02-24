@@ -44,6 +44,7 @@ export class DbClient {
   private importProgressHandlers = new Map<string, (p: ImportProgress) => void>();
   private tabSessionId: string;
   private workerFatalError: Error | null = null;
+  private disposed = false;
 
   constructor() {
     this.tabSessionId = getOrCreateTabSessionId();
@@ -184,11 +185,23 @@ export class DbClient {
     await this.request({ type: "cancel" });
   }
 
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const error = new Error("DbClient has been disposed");
+    this.workerFatalError = error;
+    this.importProgressHandlers.clear();
+    this.rejectAllPending(error);
+    this.worker.onmessage = null;
+    this.worker.terminate();
+  }
+
   private async request<T = unknown>(
     req: WorkerRequestWithoutId,
     requestId?: string,
     options?: { timeoutMs?: number }
   ): Promise<T> {
+    if (this.disposed) throw new Error("DbClient has been disposed");
     if (this.workerFatalError) throw this.workerFatalError;
     const id = requestId ?? this.newRequestId();
     const msg: WorkerRequest = { ...(req as WorkerRequest), requestId: id };

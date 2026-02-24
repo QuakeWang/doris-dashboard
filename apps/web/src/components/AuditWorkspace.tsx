@@ -1,4 +1,4 @@
-import { Tabs } from "antd";
+import { Alert, Tabs, Typography } from "antd";
 import type { AuditTabKey } from "../app/diagnosticsNavigation";
 import type {
   ImportProgress,
@@ -14,130 +14,135 @@ import OverviewTab from "./OverviewTab";
 import ShareTab from "./ShareTab";
 import TopSqlTab from "./TopSqlTab";
 
-export interface AuditWorkspaceProps {
+export interface AuditWorkspaceStatusModel {
   ready: boolean;
   datasetId: string | null;
   importing: boolean;
   importProgress: ImportProgress | null;
   dorisConfigured: boolean;
+  importError: string | null;
+}
+
+export interface AuditWorkspaceImportModel {
+  onDismissImportError: () => void;
   onOpenDoris: () => void;
   onOpenDorisImport: () => void;
   onImport: (file: File) => void;
   onCancel: () => void;
+}
+
+export interface AuditWorkspaceFiltersModel {
   overview: OverviewResult | null;
-  filtersDraft: QueryFilters;
-  onPatchFiltersDraft: (patch: Partial<QueryFilters>) => void;
-  onApplyFilters: () => void;
-  onSetFiltersBoth: (next: QueryFilters) => void;
+  draft: QueryFilters;
+  onPatchDraft: (patch: Partial<QueryFilters>) => void;
+  onApply: () => void;
+  onSetBoth: (next: QueryFilters) => void;
+}
+
+export interface AuditWorkspaceTabsModel {
   activeAuditTab: AuditTabKey;
   onSwitchAuditTab: (tab: AuditTabKey) => void;
-  overviewLoading: boolean;
-  onRefreshOverview: () => void;
-  onPatchFiltersBoth: (patch: Partial<QueryFilters>) => void;
-  onJumpToTopSqlByTable: (tableName: string) => void;
-  topSqlLoading: boolean;
-  topSqlRows: TopSqlRow[];
-  topSqlSearch: string;
-  onChangeTopSqlSearch: (value: string) => void;
-  onRefreshTopSql: () => void;
-  onOpenTopSqlTemplate: (row: TopSqlRow) => void;
-  shareLoading: boolean;
-  shareRows: ShareRow[];
-  shareMetric: "cpu" | "time" | "memory";
-  shareRankBy: ShareRankBy;
-  shareChartType: "bar" | "pie";
-  shareTopN: number;
-  onChangeShareMetric: (metric: "cpu" | "time" | "memory") => void;
-  onChangeShareRankBy: (rankBy: ShareRankBy) => void;
-  onChangeShareChartType: (chartType: "bar" | "pie") => void;
-  onChangeShareTopN: (topN: number) => void;
-  onRefreshShare: () => void;
-  onOpenShareTemplate: (row: ShareRow) => void;
+  overview: {
+    loading: boolean;
+    error: string | null;
+    onRefresh: () => void;
+    onPatchFilters: (patch: Partial<QueryFilters>) => void;
+    onJumpToTopSqlByTable: (tableName: string) => void;
+  };
+  topSql: {
+    loading: boolean;
+    error: string | null;
+    rows: TopSqlRow[];
+    search: string;
+    onChangeSearch: (value: string) => void;
+    onRefresh: () => void;
+    onOpenTemplate: (row: TopSqlRow) => void;
+  };
+  share: {
+    loading: boolean;
+    error: string | null;
+    rows: ShareRow[];
+    metric: "cpu" | "time" | "memory";
+    rankBy: ShareRankBy;
+    chartType: "bar" | "pie";
+    topN: number;
+    onChangeMetric: (metric: "cpu" | "time" | "memory") => void;
+    onChangeRankBy: (rankBy: ShareRankBy) => void;
+    onChangeChartType: (chartType: "bar" | "pie") => void;
+    onChangeTopN: (topN: number) => void;
+    onRefresh: () => void;
+    onOpenTemplate: (row: ShareRow) => void;
+  };
+}
+
+export interface AuditWorkspaceProps {
+  status: AuditWorkspaceStatusModel;
+  importModel: AuditWorkspaceImportModel;
+  filtersModel: AuditWorkspaceFiltersModel;
+  tabsModel: AuditWorkspaceTabsModel;
 }
 
 export default function AuditWorkspace(props: AuditWorkspaceProps): JSX.Element {
-  const {
-    ready,
-    datasetId,
-    importing,
-    importProgress,
-    dorisConfigured,
-    onOpenDoris,
-    onOpenDorisImport,
-    onImport,
-    onCancel,
-    overview,
-    filtersDraft,
-    onPatchFiltersDraft,
-    onApplyFilters,
-    onSetFiltersBoth,
-    activeAuditTab,
-    onSwitchAuditTab,
-    overviewLoading,
-    onRefreshOverview,
-    onPatchFiltersBoth,
-    onJumpToTopSqlByTable,
-    topSqlLoading,
-    topSqlRows,
-    topSqlSearch,
-    onChangeTopSqlSearch,
-    onRefreshTopSql,
-    onOpenTopSqlTemplate,
-    shareLoading,
-    shareRows,
-    shareMetric,
-    shareRankBy,
-    shareChartType,
-    shareTopN,
-    onChangeShareMetric,
-    onChangeShareRankBy,
-    onChangeShareChartType,
-    onChangeShareTopN,
-    onRefreshShare,
-    onOpenShareTemplate,
-  } = props;
+  const { status, importModel, filtersModel, tabsModel } = props;
 
   return (
     <>
+      {status.importError ? (
+        <Alert
+          type="error"
+          message="Audit import error"
+          description={
+            <Typography.Text style={{ whiteSpace: "pre-wrap" }}>
+              {status.importError}
+            </Typography.Text>
+          }
+          showIcon
+          closable
+          onClose={importModel.onDismissImportError}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+
       <ImportCard
-        ready={ready}
-        datasetId={datasetId}
-        importing={importing}
-        importProgress={importProgress}
-        dorisConfigured={dorisConfigured}
-        onOpenDoris={onOpenDoris}
-        onOpenDorisImport={onOpenDorisImport}
-        onImport={onImport}
-        onCancel={onCancel}
+        ready={status.ready}
+        datasetId={status.datasetId}
+        importing={status.importing}
+        importProgress={status.importProgress}
+        dorisConfigured={status.dorisConfigured}
+        onOpenDoris={importModel.onOpenDoris}
+        onOpenDorisImport={importModel.onOpenDorisImport}
+        onImport={importModel.onImport}
+        onCancel={importModel.onCancel}
       />
 
       <FiltersCard
-        datasetId={datasetId}
-        importing={importing}
-        overview={overview}
-        draft={filtersDraft}
-        onPatchDraft={onPatchFiltersDraft}
-        onApply={onApplyFilters}
-        onSetBoth={onSetFiltersBoth}
+        datasetId={status.datasetId}
+        importing={status.importing}
+        overview={filtersModel.overview}
+        draft={filtersModel.draft}
+        onPatchDraft={filtersModel.onPatchDraft}
+        onApply={filtersModel.onApply}
+        onSetBoth={filtersModel.onSetBoth}
       />
 
       <Tabs
         centered
-        activeKey={activeAuditTab}
-        onChange={(k) => onSwitchAuditTab(k as AuditTabKey)}
+        activeKey={tabsModel.activeAuditTab}
+        onChange={(k) => tabsModel.onSwitchAuditTab(k as AuditTabKey)}
         items={[
           {
             key: "overview",
             label: "Overview",
             children: (
               <OverviewTab
-                datasetId={datasetId}
-                importing={importing}
-                loading={overviewLoading}
-                overview={overview}
-                onRefresh={onRefreshOverview}
-                onPatchFilters={onPatchFiltersBoth}
-                onJumpToTopSqlByTable={onJumpToTopSqlByTable}
+                datasetId={status.datasetId}
+                importing={status.importing}
+                loading={tabsModel.overview.loading}
+                error={tabsModel.overview.error}
+                overview={filtersModel.overview}
+                onRefresh={tabsModel.overview.onRefresh}
+                onPatchFilters={tabsModel.overview.onPatchFilters}
+                onJumpToTopSqlByTable={tabsModel.overview.onJumpToTopSqlByTable}
               />
             ),
           },
@@ -146,14 +151,15 @@ export default function AuditWorkspace(props: AuditWorkspaceProps): JSX.Element 
             label: "TopSQL",
             children: (
               <TopSqlTab
-                datasetId={datasetId}
-                importing={importing}
-                loading={topSqlLoading}
-                rows={topSqlRows}
-                search={topSqlSearch}
-                onChangeSearch={onChangeTopSqlSearch}
-                onRefresh={onRefreshTopSql}
-                onOpenTemplate={onOpenTopSqlTemplate}
+                datasetId={status.datasetId}
+                importing={status.importing}
+                loading={tabsModel.topSql.loading}
+                error={tabsModel.topSql.error}
+                rows={tabsModel.topSql.rows}
+                search={tabsModel.topSql.search}
+                onChangeSearch={tabsModel.topSql.onChangeSearch}
+                onRefresh={tabsModel.topSql.onRefresh}
+                onOpenTemplate={tabsModel.topSql.onOpenTemplate}
               />
             ),
           },
@@ -162,20 +168,21 @@ export default function AuditWorkspace(props: AuditWorkspaceProps): JSX.Element 
             label: "Share",
             children: (
               <ShareTab
-                datasetId={datasetId}
-                importing={importing}
-                loading={shareLoading}
-                rows={shareRows}
-                metric={shareMetric}
-                rankBy={shareRankBy}
-                chartType={shareChartType}
-                topN={shareTopN}
-                onMetricChange={onChangeShareMetric}
-                onRankByChange={onChangeShareRankBy}
-                onChartTypeChange={onChangeShareChartType}
-                onTopNChange={onChangeShareTopN}
-                onRefresh={onRefreshShare}
-                onOpenTemplate={onOpenShareTemplate}
+                datasetId={status.datasetId}
+                importing={status.importing}
+                loading={tabsModel.share.loading}
+                error={tabsModel.share.error}
+                rows={tabsModel.share.rows}
+                metric={tabsModel.share.metric}
+                rankBy={tabsModel.share.rankBy}
+                chartType={tabsModel.share.chartType}
+                topN={tabsModel.share.topN}
+                onMetricChange={tabsModel.share.onChangeMetric}
+                onRankByChange={tabsModel.share.onChangeRankBy}
+                onChartTypeChange={tabsModel.share.onChangeChartType}
+                onTopNChange={tabsModel.share.onChangeTopN}
+                onRefresh={tabsModel.share.onRefresh}
+                onOpenTemplate={tabsModel.share.onOpenTemplate}
               />
             ),
           },

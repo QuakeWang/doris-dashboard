@@ -3,6 +3,21 @@ import { ensureDb } from "../engine";
 import { queryWithParams } from "../sql";
 import { buildWhere, clampInt, num, numOrNull, replyOk, str, toRows } from "./common";
 
+type ShareTotalAggRow = {
+  records: unknown;
+  total_cpu_ms: unknown;
+  total_time_ms: unknown;
+};
+
+type ShareAggRow = {
+  template_id: unknown;
+  template: unknown;
+  exec_count: unknown;
+  total_cpu_ms: unknown;
+  total_time_ms: unknown;
+  max_peak_mem_bytes: unknown;
+};
+
 export async function handleQueryShare(
   requestId: string,
   datasetId: string,
@@ -26,7 +41,7 @@ export async function handleQueryShare(
     `SELECT count(*) AS records, sum(cpu_time_ms) AS total_cpu_ms, sum(query_time_ms) AS total_time_ms FROM audit_log_records WHERE ${where.whereSql};`,
     where.params
   );
-  const totalRow = toRows(totalRes)[0] ?? null;
+  const totalRow = toRows<ShareTotalAggRow>(totalRes)[0] ?? null;
   const totalRecords = num(totalRow?.records);
   const totalCpuMs = num(totalRow?.total_cpu_ms);
   const totalTimeMs = num(totalRow?.total_time_ms);
@@ -45,7 +60,7 @@ export async function handleQueryShare(
   let sumTopCpu = 0;
   let sumTopTime = 0;
   let sumTopCount = 0;
-  for (const r of toRows(topRes)) {
+  for (const r of toRows<ShareAggRow>(topRes)) {
     const cpu = num(r.total_cpu_ms);
     const time = num(r.total_time_ms);
     const count = num(r.exec_count);

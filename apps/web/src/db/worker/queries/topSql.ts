@@ -3,6 +3,19 @@ import { ensureDb } from "../engine";
 import { queryWithParams } from "../sql";
 import { buildWhere, clampInt, num, numOrNull, replyOk, str, strOrNull, toRows } from "./common";
 
+type TopSqlAggRow = {
+  template_id: unknown;
+  template: unknown;
+  table_guess: unknown;
+  exec_count: unknown;
+  total_cpu_ms: unknown;
+  total_time_ms: unknown;
+  avg_time_ms: unknown;
+  max_time_ms: unknown;
+  p95_time_ms: unknown;
+  max_peak_mem_bytes: unknown;
+};
+
 export async function handleQueryTopSql(
   requestId: string,
   datasetId: string,
@@ -19,7 +32,7 @@ export async function handleQueryTopSql(
     [...where.params, safeTopN]
   );
 
-  const rows: TopSqlRow[] = toRows(res).map((r) => ({
+  const rows: TopSqlRow[] = toRows<TopSqlAggRow>(res).map((r) => ({
     templateHash: str(r.template_id),
     template: str(r.template),
     tableGuess: strOrNull(r.table_guess),

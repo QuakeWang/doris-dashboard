@@ -1,4 +1,5 @@
-import { Button, Card, Col, InputNumber, Row, Select, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Col, InputNumber, Row, Select, Space, Table, Typography } from "antd";
+import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
 import type { ShareRankBy, ShareRow } from "../db/client/protocol";
 import {
@@ -19,12 +20,28 @@ type ShareMetric = "cpu" | "time" | "memory";
 const TOOLTIP_CSS =
   "max-width: 420px; white-space: normal; word-break: break-word; overflow-wrap: anywhere; line-height: 1.35;";
 
+interface TooltipSize {
+  viewSize?: [number, number] | number[];
+  contentSize?: [number, number] | number[];
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function dataIndexFrom(value: unknown): number {
+  const obj = asObject(value);
+  const index = Number(obj?.dataIndex ?? -1);
+  return Number.isFinite(index) ? index : -1;
+}
+
 const clampTooltip = (
   pos: number[] | undefined,
   _params: unknown,
   _dom: unknown,
   _rect: unknown,
-  size: any
+  size: TooltipSize
 ) => {
   const p = Array.isArray(pos) ? pos : [0, 0];
   const viewW = Number(size?.viewSize?.[0] ?? 0);
@@ -59,6 +76,7 @@ export interface ShareTabProps {
   datasetId: string | null;
   importing: boolean;
   loading: boolean;
+  error: string | null;
   rows: ShareRow[];
   metric: ShareMetric;
   rankBy: ShareRankBy;
@@ -77,6 +95,7 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
     datasetId,
     importing,
     loading,
+    error,
     rows,
     metric,
     rankBy,
@@ -98,7 +117,7 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
   const effectiveChartType: "bar" | "pie" = isMemory ? "bar" : chartType;
   const rankByOptions = isMemory ? RANK_BY_OPTIONS_MEMORY : RANK_BY_OPTIONS_CPU_TIME;
 
-  const option = useMemo(() => {
+  const option = useMemo<EChartsOption>(() => {
     const formatMetricValue = (v: number) =>
       metric === "memory" ? formatBytes(v) : formatDurationMs(v);
 
@@ -127,7 +146,7 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
           ? r.totalCpuMs
           : metric === "time"
             ? r.totalTimeMs
-            : (r.maxPeakMemBytes ?? "-"),
+            : Number(r.maxPeakMemBytes ?? 0),
     }));
 
     if (effectiveChartType === "pie") {
@@ -137,7 +156,7 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
           confine: true,
           extraCssText: TOOLTIP_CSS,
           position: clampTooltip,
-          formatter: (p: any) => formatShareTooltip(Number(p?.dataIndex ?? -1)),
+          formatter: (params: unknown) => formatShareTooltip(dataIndexFrom(params)),
         },
         series: [
           {
@@ -160,9 +179,9 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
         confine: true,
         extraCssText: TOOLTIP_CSS,
         position: clampTooltip,
-        formatter: (params: any) => {
+        formatter: (params: unknown) => {
           const p = Array.isArray(params) ? params[0] : params;
-          return formatShareTooltip(Number(p?.dataIndex ?? -1));
+          return formatShareTooltip(dataIndexFrom(p));
         },
       },
       xAxis: {
@@ -185,9 +204,8 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
   }, [effectiveChartType, metric, visibleRows]);
 
   const shareChartClick = (params: unknown) => {
-    const p = params as any;
-    const i = Number(p?.dataIndex ?? -1);
-    if (!Number.isFinite(i) || i < 0) return;
+    const i = dataIndexFrom(params);
+    if (i < 0) return;
     const row = visibleRows[i];
     if (!row || row.isOthers) return;
     onOpenTemplate(row);
@@ -308,10 +326,19 @@ export default function ShareTab(props: ShareTabProps): JSX.Element {
         </Space>
       }
     >
+      {error ? (
+        <Alert
+          type="error"
+          message="Query failed"
+          description={error}
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       <AsyncContent loading={loading} error={null} isEmpty={visibleRows.length === 0}>
         <Row gutter={12}>
           <Col xs={24} lg={12}>
-            <EChart option={option as any} height={420} onClick={shareChartClick} />
+            <EChart option={option} height={420} onClick={shareChartClick} />
           </Col>
           <Col xs={24} lg={12}>
             <Table<ShareRow>
