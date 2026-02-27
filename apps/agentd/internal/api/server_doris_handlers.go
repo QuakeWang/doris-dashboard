@@ -39,13 +39,12 @@ func (s *Server) handleDorisConnectionTest(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	applyReadWriteTimeout(&cfg, 15*time.Second)
-	version, err := s.queryVersion(ctx, cfg)
-	if err != nil {
+	if err := s.testConnection(ctx, cfg); err != nil {
 		writeErrorWithRequest(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeData(w, r, http.StatusOK, map[string]any{
-		"version": version,
+		"connected": true,
 	})
 }
 

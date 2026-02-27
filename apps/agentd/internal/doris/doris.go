@@ -58,6 +58,9 @@ func OpenDB(cfg ConnConfig) (*sql.DB, error) {
 	c.Timeout = connectTimeout
 	c.ReadTimeout = rwTimeout
 	c.WriteTimeout = rwTimeout
+	// Doris clusters may disable server-side prepared statements.
+	// Interpolate placeholders on client side so QueryContext with args still works.
+	c.InterpolateParams = true
 	c.Params = map[string]string{
 		"charset": "utf8mb4",
 	}
@@ -84,16 +87,19 @@ func openAndPing(ctx context.Context, cfg ConnConfig) (*sql.DB, error) {
 	return db, nil
 }
 
-func QueryVersion(ctx context.Context, cfg ConnConfig) (string, error) {
+func TestConnection(ctx context.Context, cfg ConnConfig) error {
 	db, err := openAndPing(ctx, cfg)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer db.Close()
 
-	var version string
-	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
-		return "", err
+	var probe int
+	if err := db.QueryRowContext(ctx, "SELECT 1").Scan(&probe); err != nil {
+		return err
 	}
-	return version, nil
+	if probe != 1 {
+		return errors.New("unexpected SELECT 1 result")
+	}
+	return nil
 }

@@ -25,6 +25,21 @@ type ExplainRunner func(ctx context.Context, cfg doris.ConnConfig, sql string, m
 
 type ListDatabasesRunner func(ctx context.Context, cfg doris.ConnConfig) ([]string, error)
 
+type TestConnectionRunner func(ctx context.Context, cfg doris.ConnConfig) error
+
+type SchemaAuditScanRunner func(
+	ctx context.Context,
+	cfg doris.ConnConfig,
+	opts doris.SchemaAuditScanOptions,
+) (doris.SchemaAuditScanResult, error)
+
+type SchemaAuditTableDetailRunner func(
+	ctx context.Context,
+	cfg doris.ConnConfig,
+	database string,
+	table string,
+) (doris.SchemaAuditTableDetailResult, error)
+
 type countingWriter struct {
 	w io.Writer
 	n int64
@@ -130,31 +145,35 @@ func normalizeExplainMode(mode string) (string, error) {
 }
 
 type Server struct {
-	exportAuditLog AuditLogExporter
-	queryVersion   func(ctx context.Context, cfg doris.ConnConfig) (string, error)
-	explain        ExplainRunner
-	listDatabases  ListDatabasesRunner
-	exportTimeout  time.Duration
+	exportAuditLog         AuditLogExporter
+	testConnection         TestConnectionRunner
+	explain                ExplainRunner
+	listDatabases          ListDatabasesRunner
+	schemaAuditScan        SchemaAuditScanRunner
+	schemaAuditTableDetail SchemaAuditTableDetailRunner
+	exportTimeout          time.Duration
 }
 
 func NewServer(
 	exporter AuditLogExporter,
 	exportTimeout time.Duration,
-	queryVersion ...func(ctx context.Context, cfg doris.ConnConfig) (string, error),
+	testConnection ...TestConnectionRunner,
 ) http.Handler {
-	qv := doris.QueryVersion
-	if len(queryVersion) > 0 && queryVersion[0] != nil {
-		qv = queryVersion[0]
+	tc := doris.TestConnection
+	if len(testConnection) > 0 && testConnection[0] != nil {
+		tc = testConnection[0]
 	}
-	return newServer(exporter, exportTimeout, qv, nil, nil)
+	return newServer(exporter, exportTimeout, tc, nil, nil, nil, nil)
 }
 
 func newServer(
 	exporter AuditLogExporter,
 	exportTimeout time.Duration,
-	queryVersion func(ctx context.Context, cfg doris.ConnConfig) (string, error),
+	testConnection TestConnectionRunner,
 	explain ExplainRunner,
 	listDatabases ListDatabasesRunner,
+	schemaAuditScan SchemaAuditScanRunner,
+	schemaAuditTableDetail SchemaAuditTableDetailRunner,
 ) http.Handler {
 	if exporter == nil {
 		exporter = doris.StreamAuditLogOutfileTSVLookback
@@ -162,8 +181,8 @@ func newServer(
 	if exportTimeout <= 0 {
 		exportTimeout = 60 * time.Second
 	}
-	if queryVersion == nil {
-		queryVersion = doris.QueryVersion
+	if testConnection == nil {
+		testConnection = doris.TestConnection
 	}
 	if explain == nil {
 		explain = func(ctx context.Context, cfg doris.ConnConfig, sqlText string, mode string) (string, error) {
@@ -180,13 +199,21 @@ func newServer(
 	if listDatabases == nil {
 		listDatabases = doris.ListDatabases
 	}
+	if schemaAuditScan == nil {
+		schemaAuditScan = doris.BuildSchemaAuditScan
+	}
+	if schemaAuditTableDetail == nil {
+		schemaAuditTableDetail = doris.BuildSchemaAuditTableDetail
+	}
 
 	server := &Server{
-		exportAuditLog: exporter,
-		queryVersion:   queryVersion,
-		explain:        explain,
-		listDatabases:  listDatabases,
-		exportTimeout:  exportTimeout,
+		exportAuditLog:         exporter,
+		testConnection:         testConnection,
+		explain:                explain,
+		listDatabases:          listDatabases,
+		schemaAuditScan:        schemaAuditScan,
+		schemaAuditTableDetail: schemaAuditTableDetail,
+		exportTimeout:          exportTimeout,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", server.handleHealth)
@@ -195,6 +222,8 @@ func newServer(
 	mux.HandleFunc("/api/v1/doris/audit-log/export", server.handleDorisAuditLogExport)
 	mux.HandleFunc("/api/v1/doris/explain", server.handleDorisExplain)
 	mux.HandleFunc("/api/v1/doris/explain/tree", server.handleDorisExplain)
+	mux.HandleFunc("/api/v1/doris/schema-audit/scan", server.handleDorisSchemaAuditScan)
+	mux.HandleFunc("/api/v1/doris/schema-audit/table-detail", server.handleDorisSchemaAuditTableDetail)
 	return withLocalOnly(withCORS(mux))
 }
 

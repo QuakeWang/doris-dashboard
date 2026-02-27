@@ -36,6 +36,11 @@ export const DIAGNOSTICS_MODULES = [
     label: "Explain",
     legacyTabs: ["explain"],
   },
+  {
+    id: "schemaAudit",
+    label: "Schema Audit",
+    legacyTabs: ["schemaAudit"],
+  },
 ] as const satisfies readonly DiagnosticsModuleRegistration[];
 
 export type DiagnosticsModule = (typeof DIAGNOSTICS_MODULES)[number]["id"];
