@@ -797,7 +797,17 @@ func schemaAuditIsFutureDynamicPartitionName(
 		if err != nil {
 			return false, false
 		}
-		referenceHour := reference.Truncate(time.Hour)
+		referenceLocal := reference.In(location)
+		referenceHour := time.Date(
+			referenceLocal.Year(),
+			referenceLocal.Month(),
+			referenceLocal.Day(),
+			referenceLocal.Hour(),
+			0,
+			0,
+			0,
+			location,
+		)
 		return partitionTime.After(referenceHour), true
 	case "MONTH":
 		if len(name) != 6 {

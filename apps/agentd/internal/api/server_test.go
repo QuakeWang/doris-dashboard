@@ -472,34 +472,40 @@ func TestSchemaAuditScanRunnerErrorStatus(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		runnerErr  error
-		wantStatus int
+		name            string
+		runnerErr       error
+		wantStatus      int
+		wantErrContains string
 	}{
 		{
-			name:       "validation error returns bad request",
-			runnerErr:  errors.New("database filter is invalid"),
-			wantStatus: http.StatusBadRequest,
+			name:            "validation error returns bad request",
+			runnerErr:       errors.New("database filter is invalid"),
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "database filter is invalid",
 		},
 		{
-			name:       "upstream error returns bad gateway",
-			runnerErr:  errors.New("dial tcp 10.0.0.1:9030: i/o timeout"),
-			wantStatus: http.StatusBadGateway,
+			name:            "upstream error returns bad gateway",
+			runnerErr:       errors.New("dial tcp 10.0.0.1:9030: i/o timeout"),
+			wantStatus:      http.StatusBadGateway,
+			wantErrContains: "i/o timeout",
 		},
 		{
-			name:       "mysql unknown database returns bad request",
-			runnerErr:  &mysql.MySQLError{Number: 1049, Message: "Unknown database 'db_not_exists'"},
-			wantStatus: http.StatusBadRequest,
+			name:            "mysql unknown database returns bad request",
+			runnerErr:       &mysql.MySQLError{Number: 1049, Message: "Unknown database 'db_not_exists'"},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "Unknown database",
 		},
 		{
-			name:       "mysql unknown error with unknown table detail returns bad request",
-			runnerErr:  &mysql.MySQLError{Number: 1105, Message: "detailMessage = Unknown table 'db1.tbl_not_exists'"},
-			wantStatus: http.StatusBadRequest,
+			name:            "mysql unknown error with unknown table detail returns bad request",
+			runnerErr:       &mysql.MySQLError{Number: 1105, Message: "detailMessage = Unknown table 'db1.tbl_not_exists'"},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "Unknown table",
 		},
 		{
-			name:       "mysql unknown error without object detail returns bad gateway",
-			runnerErr:  &mysql.MySQLError{Number: 1105, Message: "detailMessage = rpc timeout while fetching metadata"},
-			wantStatus: http.StatusBadGateway,
+			name:            "mysql unknown error without object detail returns bad gateway",
+			runnerErr:       &mysql.MySQLError{Number: 1105, Message: "detailMessage = rpc timeout while fetching metadata"},
+			wantStatus:      http.StatusBadGateway,
+			wantErrContains: "rpc timeout",
 		},
 	}
 
@@ -518,7 +524,7 @@ func TestSchemaAuditScanRunnerErrorStatus(t *testing.T) {
 
 			w := serveLocalJSON(h, http.MethodPost, schemaAuditScanPath, schemaAuditScanBody)
 
-			assertErrContains(t, w, tc.wantStatus, tc.runnerErr.Error())
+			assertErrContains(t, w, tc.wantStatus, tc.wantErrContains)
 		})
 	}
 }
@@ -526,36 +532,46 @@ func TestSchemaAuditScanRunnerErrorStatus(t *testing.T) {
 func TestSchemaAuditTableDetailRunnerErrorStatus(t *testing.T) {
 	t.Parallel()
 
-	h := newTestServerWithSchemaAuditTableDetailRunner(func(
-		context.Context,
-		doris.ConnConfig,
-		string,
-		string,
-	) (doris.SchemaAuditTableDetailResult, error) {
-		return doris.SchemaAuditTableDetailResult{}, errors.New("query execution failed")
-	})
+	tests := []struct {
+		name            string
+		runnerErr       error
+		wantStatus      int
+		wantErrContains string
+	}{
+		{
+			name:            "generic runner error returns bad gateway",
+			runnerErr:       errors.New("query execution failed"),
+			wantStatus:      http.StatusBadGateway,
+			wantErrContains: "query execution failed",
+		},
+		{
+			name: "mysql unknown table returns bad request",
+			runnerErr: &mysql.MySQLError{
+				Number:  1146,
+				Message: "Table 'db1.tbl_not_exists' doesn't exist",
+			},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "doesn't exist",
+		},
+	}
 
-	w := serveLocalJSON(h, http.MethodPost, schemaAuditTableDetailPath, schemaAuditTableDetailBody)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	assertErrContains(t, w, http.StatusBadGateway, "query execution failed")
-}
+			h := newTestServerWithSchemaAuditTableDetailRunner(func(
+				context.Context,
+				doris.ConnConfig,
+				string,
+				string,
+			) (doris.SchemaAuditTableDetailResult, error) {
+				return doris.SchemaAuditTableDetailResult{}, tc.runnerErr
+			})
 
-func TestSchemaAuditTableDetailRunnerMySQLRequestErrorStatus(t *testing.T) {
-	t.Parallel()
+			w := serveLocalJSON(h, http.MethodPost, schemaAuditTableDetailPath, schemaAuditTableDetailBody)
 
-	h := newTestServerWithSchemaAuditTableDetailRunner(func(
-		context.Context,
-		doris.ConnConfig,
-		string,
-		string,
-	) (doris.SchemaAuditTableDetailResult, error) {
-		return doris.SchemaAuditTableDetailResult{}, &mysql.MySQLError{
-			Number:  1146,
-			Message: "Table 'db1.tbl_not_exists' doesn't exist",
-		}
-	})
-
-	w := serveLocalJSON(h, http.MethodPost, schemaAuditTableDetailPath, schemaAuditTableDetailBody)
-
-	assertErrContains(t, w, http.StatusBadRequest, "doesn't exist")
+			assertErrContains(t, w, tc.wantStatus, tc.wantErrContains)
+		})
+	}
 }

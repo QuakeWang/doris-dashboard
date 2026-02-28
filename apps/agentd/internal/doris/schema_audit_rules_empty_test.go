@@ -410,6 +410,37 @@ func TestSchemaAuditIsFutureDynamicPartitionNameWeek(t *testing.T) {
 	}
 }
 
+func TestSchemaAuditIsFutureDynamicPartitionNameHourUsesLocalHourBoundary(t *testing.T) {
+	t.Parallel()
+
+	location := time.FixedZone("UTC+5:30", 5*3600+30*60)
+	reference := time.Date(2026, time.February, 26, 10, 45, 0, 0, location)
+
+	isFuture, ok := schemaAuditIsFutureDynamicPartitionName(
+		"p2026022610",
+		"p",
+		"HOUR",
+		reference,
+		location,
+		1,
+	)
+	if !ok || isFuture {
+		t.Fatalf("expected current local hour partition to be non-future, ok=%v, isFuture=%v", ok, isFuture)
+	}
+
+	isFuture, ok = schemaAuditIsFutureDynamicPartitionName(
+		"p2026022611",
+		"p",
+		"HOUR",
+		reference,
+		location,
+		1,
+	)
+	if !ok || !isFuture {
+		t.Fatalf("expected next local hour partition to be future, ok=%v, isFuture=%v", ok, isFuture)
+	}
+}
+
 func TestSchemaAuditEffectiveEmptyStatsUsesPartitionRangeFirst(t *testing.T) {
 	t.Parallel()
 
