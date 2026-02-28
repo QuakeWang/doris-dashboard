@@ -7,6 +7,7 @@ import { compareNullableNumber } from "../utils/sort";
 import CopyIconButton from "./CopyIconButton";
 
 const { Text } = Typography;
+const TOP_SQL_PAGE_SIZE = 20;
 
 export interface TopSqlTabProps {
   datasetId: string | null;
@@ -171,7 +172,7 @@ export default function TopSqlTab(props: TopSqlTabProps): JSX.Element {
         tableLayout="fixed"
         columns={columns}
         dataSource={filteredRows}
-        pagination={{ pageSize: 20 }}
+        pagination={{ pageSize: TOP_SQL_PAGE_SIZE, showSizeChanger: false }}
       />
     </Card>
   );

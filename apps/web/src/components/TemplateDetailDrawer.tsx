@@ -66,6 +66,7 @@ const SAMPLES_ORDER_LABEL: Record<SampleOrderBy, string> = {
   cpuTimeMs: "cpu_time_ms",
   peakMemoryBytes: "peak_memory_bytes",
 };
+const SAMPLE_TABLE_PAGE_SIZE = 10;
 
 function formatBucketLabel(seconds: number): string {
   if (seconds % 86400 === 0) return `${seconds / 86400}d`;
@@ -420,7 +421,7 @@ export default function TemplateDetailDrawer(props: TemplateDetailDrawerProps): 
                       <Table<QuerySampleRow>
                         rowKey={(r) => String(r.recordId)}
                         size="small"
-                        pagination={{ pageSize: 10 }}
+                        pagination={{ pageSize: SAMPLE_TABLE_PAGE_SIZE, showSizeChanger: false }}
                         columns={sampleColumns}
                         dataSource={samples}
                         scroll={{ x: 1400 }}

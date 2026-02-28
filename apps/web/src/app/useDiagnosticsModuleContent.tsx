@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { AgentClient, DorisConnectionInput } from "../agent/agentClient";
 import AuditWorkspace from "../components/AuditWorkspace";
 import ExplainWorkspace from "../components/ExplainWorkspace";
+import SchemaAuditWorkspace from "../components/SchemaAuditWorkspace";
 import type { DbClient } from "../db/client/dbClient";
 import {
   type AuditTabKey,
@@ -76,6 +77,14 @@ export function useDiagnosticsModuleContent(params: UseDiagnosticsModuleContentP
         onOpenDoris={onOpenDoris}
         sql={explainSql}
         onChangeSql={setExplainSql}
+      />
+    ),
+    schemaAudit: () => (
+      <SchemaAuditWorkspace
+        agent={agent}
+        dorisConn={dorisConn}
+        dorisConfigured={dorisConfigured}
+        onOpenDoris={onOpenDoris}
       />
     ),
   });
