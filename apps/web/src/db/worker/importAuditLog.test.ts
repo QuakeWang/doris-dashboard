@@ -420,6 +420,26 @@ describe("handleImportAuditLog index lifecycle", () => {
     });
   });
 
+  it("full-scans SQL-like file when first line has no CSV delimiter", async () => {
+    setupSuccessfulImportMocks();
+    const dumpInsert =
+      "INSERT INTO `audit_log` (`query_id`,`time`,`client_ip`,`user`,`db`,`state`,`error_code`,`error_message`,`query_time`,`scan_bytes`,`scan_rows`,`return_rows`,`frontend_ip`,`cpu_time_ms`,`peak_memory_bytes`,`workload_group`,`compute_group`,`stmt`) VALUES ('q-no-delim','2026-01-05 06:44:17.002000','203.0.113.10:51178','test_user','test_db','EOF',0,'',13,10,11,12,'10.0.0.1',19,20,'wg1','cg1','select 1');";
+    const file = mockFileWithHeadMiddleTailSamples(
+      "-- mysql dump preface without csv delimiter\n",
+      "-- middle sample without audit_log markers\n",
+      "-- tail sample without audit_log markers\n",
+      `${dumpInsert}\n`
+    );
+
+    await handleImportAuditLog("req-dump-no-delim", "dataset-dump-no-delim", file);
+
+    expectImportSuccess("req-dump-no-delim", {
+      recordsInserted: 1,
+      badRecords: 0,
+      formatDetected: "auditLogMysqlDump",
+    });
+  });
+
   it("detects MySQL dump by full scan for large files when probe samples miss markers", async () => {
     setupSuccessfulImportMocks();
     const filler = new Array(29).fill("NULL");
@@ -482,6 +502,43 @@ describe("handleImportAuditLog index lifecycle", () => {
 
     expect(streamReadCount).toBe(1);
     expectImportSuccess("req-large-csv-no-prescan", {
+      recordsInserted: 1,
+      badRecords: 0,
+      formatDetected: "auditLogOutfileCsv",
+    });
+  });
+
+  it("does not classify as MySQL dump when probe slice starts in the middle of CSV stmt", async () => {
+    setupSuccessfulImportMocks();
+    const csv = buildAuditLogRow({
+      0: "q-csv-probe-boundary",
+      1: "2026-01-05 06:44:17.002000",
+      2: "203.0.113.10:51178",
+      3: "test_user",
+      5: "test_db",
+      6: "EOF",
+      7: "0",
+      9: "13",
+      10: "10",
+      11: "11",
+      12: "12",
+      21: "10.0.0.1",
+      22: "19",
+      25: "20",
+      26: "wg1",
+      27: "cg1",
+      28: "select 42",
+    });
+    const file = mockLargeFileWithHeadMiddleTailSamples(
+      `${csv}\n`,
+      " insert into audit_log values (1) this is sliced from inside csv stmt\n",
+      "-- tail sample without dump markers\n",
+      `${csv}\n`
+    );
+
+    await handleImportAuditLog("req-csv-probe-boundary", "dataset-csv-probe-boundary", file);
+
+    expectImportSuccess("req-csv-probe-boundary", {
       recordsInserted: 1,
       badRecords: 0,
       formatDetected: "auditLogOutfileCsv",

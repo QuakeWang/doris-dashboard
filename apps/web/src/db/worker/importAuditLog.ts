@@ -98,7 +98,9 @@ async function detectAuditLogInputFormat(
     for (const start of probeStarts) {
       if (start <= 0) continue;
       const sample = await file.slice(start, start + FORMAT_DETECT_SAMPLE_BYTES).text();
-      if (looksLikeAuditLogMysqlDump(sample)) return { format: "auditLogMysqlDump" };
+      // Probe slices can start in the middle of a line, so avoid treating slice start as a true "^" boundary.
+      const markerSample = `x${sample}`;
+      if (looksLikeAuditLogMysqlDump(markerSample)) return { format: "auditLogMysqlDump" };
       maybeMysqlDumpSql = maybeMysqlDumpSql || MYSQL_DUMP_SQL_ENVELOPE_RE.test(sample);
     }
   }
@@ -108,14 +110,11 @@ async function detectAuditLogInputFormat(
     .find((l) => l.trim().length > 0)
     ?.trim();
   const delimiter = firstLine ? detectOutfileDelimiter(firstLine) : null;
-  if (!delimiter) return { format: "feAuditLog" };
-  if (
-    delimiter === "," &&
-    maybeMysqlDumpSql &&
-    (await hasAuditLogMysqlDumpMarkerAnywhere(file, signal))
-  ) {
+  const shouldFullScanForDumpMarker = maybeMysqlDumpSql && (delimiter === "," || !delimiter);
+  if (shouldFullScanForDumpMarker && (await hasAuditLogMysqlDumpMarkerAnywhere(file, signal))) {
     return { format: "auditLogMysqlDump" };
   }
+  if (!delimiter) return { format: "feAuditLog" };
   return { format: "auditLogOutfileCsv", outfileDelimiter: delimiter };
 }
 
