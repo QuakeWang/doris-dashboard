@@ -71,7 +71,8 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
             <p className="ant-upload-text">Click or drag file to import</p>
             <p className="ant-upload-hint">
               Supports <Text code>fe.audit.log</Text> and <Text code>audit_log</Text> OUTFILE{" "}
-              CSV/TSV. No data is uploaded. Everything runs locally in your browser.
+              CSV/TSV and MySQL dump SQL. No data is uploaded. Everything runs locally in your
+              browser.
             </p>
           </Upload.Dragger>
         </Col>
@@ -90,12 +91,14 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
               </Col>
               <Col span={12}>
                 <Statistic
-                  title="Parsed / Inserted / Bad"
+                  title="Parsed / Inserted / Bad / Filtered"
                   value={
                     importProgress
                       ? `${formatNumber(importProgress.recordsParsed)} / ${formatNumber(
                           importProgress.recordsInserted
-                        )} / ${formatNumber(importProgress.badRecords)}`
+                        )} / ${formatNumber(importProgress.badRecords)} / ${formatNumber(
+                          importProgress.filteredRecords
+                        )}`
                       : "-"
                   }
                 />
@@ -108,6 +111,13 @@ export default function ImportCard(props: ImportCardProps): JSX.Element {
                   {importProgress.bytesTotal > 0
                     ? `${((importProgress.bytesRead / importProgress.bytesTotal) * 100).toFixed(1)}%`
                     : "-"}
+                </Text>
+                <br />
+                <Text type="secondary">
+                  Format: <Text code>{importProgress.formatDetected}</Text>
+                  {importProgress.formatDetected === "auditLogMysqlDump"
+                    ? `, stmt=${formatNumber(importProgress.statementsScanned)} / matched=${formatNumber(importProgress.insertStatementsMatched)} / badStmt=${formatNumber(importProgress.badStatements)} / filtered=${formatNumber(importProgress.filteredRecords)}`
+                    : ""}
                 </Text>
               </div>
             )}

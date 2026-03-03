@@ -77,12 +77,24 @@ export type WorkerResponse =
   | { type: "response"; requestId: string; ok: false; error: { message: string; stack?: string } }
   | { type: "event"; event: WorkerEvent };
 
+export type ImportDetectedFormat =
+  | "unknown"
+  | "feAuditLog"
+  | "auditLogOutfileCsv"
+  | "auditLogMysqlDump";
+
 export interface ImportProgress {
   bytesRead: number;
   bytesTotal: number;
   recordsParsed: number;
   recordsInserted: number;
   badRecords: number;
+  formatDetected: ImportDetectedFormat;
+  statementsScanned: number;
+  insertStatementsMatched: number;
+  tuplesParsed: number;
+  badStatements: number;
+  filteredRecords: number;
 }
 
 export interface TopSqlRow {
