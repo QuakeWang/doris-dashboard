@@ -27,6 +27,12 @@ describe("runAuditImportFlow", () => {
       recordsParsed: 8,
       recordsInserted: 8,
       badRecords: 0,
+      formatDetected: "auditLogMysqlDump" as const,
+      statementsScanned: 4,
+      insertStatementsMatched: 1,
+      tuplesParsed: 8,
+      badStatements: 0,
+      filteredRecords: 0,
     };
     const overview: OverviewResult = {
       records: 8,

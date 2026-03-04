@@ -1,5 +1,10 @@
 import * as arrow from "apache-arrow";
 import {
+  isMysqlDumpNoiseRecord,
+  iterateAuditLogRecordsFromMysqlDump,
+  looksLikeAuditLogMysqlDump,
+} from "../../import/auditLogMysqlDump";
+import {
   type AuditLogOutfileDelimiter,
   type OutfileHeader,
   detectOutfileDelimiter,
@@ -19,12 +24,15 @@ const BATCH_SIZE = 5000;
 const MAX_BATCH_BYTES = 8 * 1024 * 1024;
 const LARGE_FILE_CHUNKED_TXN_THRESHOLD_BYTES = 256 * 1024 * 1024;
 const MIN_ARROW_INSERT_ROWS = 200;
+const FORMAT_DETECT_SAMPLE_BYTES = 256 * 1024;
 
-type AuditLogInputFormat = "feAuditLog" | "auditLogOutfileCsv";
+type AuditLogInputFormat = "feAuditLog" | "auditLogOutfileCsv" | "auditLogMysqlDump";
 type PreparedStatement = {
   query: (...params: unknown[]) => Promise<unknown>;
   close: () => Promise<void>;
 };
+const MYSQL_DUMP_SQL_ENVELOPE_RE =
+  /(?:^|[\r\n])\s*(?:\/\*![0-9]{5}\s|\/\*|--\s|#|insert\s+|create\s+table|lock\s+tables|unlock\s+tables|set\s+)/i;
 
 function errorMessageOf(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
@@ -39,26 +47,75 @@ function mergeMainAndFinalizeError(mainError: unknown, finalizeError: Error): Er
   return new Error(`${main.message}\nFinalize failure: ${finalizeError.message}`);
 }
 
-async function detectAuditLogInputFormat(file: File): Promise<{
+async function hasAuditLogMysqlDumpMarkerAnywhere(
+  file: File,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const stream = file.stream();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder("utf-8");
+  const overlapChars = 2048;
+  let carry = "";
+
+  while (true) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const { value, done } = await reader.read();
+    if (done) break;
+    const text = carry + decoder.decode(value, { stream: true });
+    if (looksLikeAuditLogMysqlDump(text)) return true;
+    carry = text.slice(-overlapChars);
+  }
+
+  const tail = decoder.decode();
+  if (tail) carry += tail;
+  return looksLikeAuditLogMysqlDump(carry);
+}
+
+async function detectAuditLogInputFormat(
+  file: File,
+  signal?: AbortSignal
+): Promise<{
   format: AuditLogInputFormat;
   outfileDelimiter?: AuditLogOutfileDelimiter;
 }> {
-  const sample = await file.slice(0, 256 * 1024).text();
-  if (sample.includes("|Stmt=") || sample.includes("|QueryId=") || sample.includes("|Time(ms)=")) {
+  const headSample = await file.slice(0, FORMAT_DETECT_SAMPLE_BYTES).text();
+  let maybeMysqlDumpSql = MYSQL_DUMP_SQL_ENVELOPE_RE.test(headSample);
+
+  if (
+    headSample.includes("|Stmt=") ||
+    headSample.includes("|QueryId=") ||
+    headSample.includes("|Time(ms)=")
+  ) {
     return { format: "feAuditLog" };
   }
 
-  const firstLine =
-    sample
-      .split(/\r?\n/)
-      .find((l) => l.trim().length > 0)
-      ?.trim() ?? null;
-  if (firstLine) {
-    const delimiter = detectOutfileDelimiter(firstLine);
-    if (delimiter) return { format: "auditLogOutfileCsv", outfileDelimiter: delimiter };
+  if (looksLikeAuditLogMysqlDump(headSample)) {
+    return { format: "auditLogMysqlDump" };
+  }
+  if (file.size > FORMAT_DETECT_SAMPLE_BYTES) {
+    const maxSampleStart = Math.max(0, file.size - FORMAT_DETECT_SAMPLE_BYTES);
+    const probeStarts = [...new Set([Math.floor(maxSampleStart / 2), maxSampleStart])];
+    for (const start of probeStarts) {
+      if (start <= 0) continue;
+      const sample = await file.slice(start, start + FORMAT_DETECT_SAMPLE_BYTES).text();
+      // Probe slices can start in the middle of a line, so avoid treating slice start as a true "^" boundary.
+      const markerSample = `x${sample}`;
+      if (looksLikeAuditLogMysqlDump(markerSample)) return { format: "auditLogMysqlDump" };
+      maybeMysqlDumpSql = maybeMysqlDumpSql || MYSQL_DUMP_SQL_ENVELOPE_RE.test(sample);
+    }
   }
 
-  return { format: "feAuditLog" };
+  const firstLine = headSample
+    .split(/\r?\n/)
+    .find((l) => l.trim().length > 0)
+    ?.trim();
+  const delimiter = firstLine ? detectOutfileDelimiter(firstLine) : null;
+  const shouldFullScanForDumpMarker = maybeMysqlDumpSql && (delimiter === "," || !delimiter);
+  if (shouldFullScanForDumpMarker && (await hasAuditLogMysqlDumpMarkerAnywhere(file, signal))) {
+    return { format: "auditLogMysqlDump" };
+  }
+  if (!delimiter) return { format: "feAuditLog" };
+  return { format: "auditLogOutfileCsv", outfileDelimiter: delimiter };
 }
 
 const estimateUtf16Bytes = (v: string | null | undefined): number =>
@@ -150,9 +207,15 @@ export async function handleImportAuditLog(
 
   const bytesTotal = file.size;
   let bytesRead = 0;
+  let formatDetected: AuditLogInputFormat | "unknown" = "unknown";
+  let statementsScanned = 0;
+  let insertStatementsMatched = 0;
+  let tuplesParsed = 0;
+  let badStatements = 0;
   let recordsParsed = 0;
   let recordsInserted = 0;
   let badRecords = 0;
+  let filteredRecords = 0;
   let recordId = 0;
 
   let batchBytes = 0;
@@ -174,7 +237,19 @@ export async function handleImportAuditLog(
       event: {
         type: "importProgress",
         requestId,
-        progress: { bytesRead, bytesTotal, recordsParsed, recordsInserted, badRecords },
+        progress: {
+          bytesRead,
+          bytesTotal,
+          recordsParsed,
+          recordsInserted,
+          badRecords,
+          formatDetected,
+          statementsScanned,
+          insertStatementsMatched,
+          tuplesParsed,
+          badStatements,
+          filteredRecords,
+        },
       },
     });
   };
@@ -303,9 +378,22 @@ export async function handleImportAuditLog(
       await c.query("BEGIN TRANSACTION");
       singleTxnStarted = true;
     }
-    const input = await detectAuditLogInputFormat(file);
-    const onProgress = (p: { bytesRead: number }) => {
+    maybeEmitProgress(true);
+    const input = await detectAuditLogInputFormat(file, signal);
+    formatDetected = input.format;
+    maybeEmitProgress(true);
+    const onProgress = (p: {
+      bytesRead: number;
+      statementsScanned?: number;
+      insertStatementsMatched?: number;
+      tuplesParsed?: number;
+      badStatements?: number;
+    }) => {
       bytesRead = p.bytesRead;
+      if (p.statementsScanned != null) statementsScanned = p.statementsScanned;
+      if (p.insertStatementsMatched != null) insertStatementsMatched = p.insertStatementsMatched;
+      if (p.tuplesParsed != null) tuplesParsed = p.tuplesParsed;
+      if (p.badStatements != null) badStatements = p.badStatements;
       maybeEmitProgress();
     };
 
@@ -380,6 +468,32 @@ export async function handleImportAuditLog(
           continue;
         }
         await processParsed(res.record, res.record.stmtRaw);
+      }
+    } else if (input.format === "auditLogMysqlDump") {
+      for await (const parsed of iterateAuditLogRecordsFromMysqlDump(file, {
+        signal,
+        onProgress,
+        onBadStatement: ({ statementIndex, reason, snippet }) => {
+          log(
+            `mysql-dump-import: skipped malformed statement #${statementIndex}: ${reason}; snippet="${snippet}"`
+          );
+        },
+      })) {
+        if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+        recordsParsed++;
+        if (isMysqlDumpNoiseRecord(parsed)) {
+          filteredRecords++;
+          continue;
+        }
+        await processParsed(parsed, parsed.stmtRaw);
+      }
+      if (filteredRecords > 0) {
+        log(`mysql-dump-import: skipped ${filteredRecords} known noise records.`);
+      }
+      if (badStatements > 0) {
+        log(
+          `mysql-dump-import: skipped ${badStatements} malformed or oversized INSERT statements and continued import.`
+        );
       }
     } else {
       let lastQueryTagQueryId: string | null = null;
@@ -457,7 +571,12 @@ export async function handleImportAuditLog(
   if (mainError) throw toError(mainError);
   if (finalizeError) throw finalizeError;
 
-  reply({ type: "response", requestId, ok: true, result: { recordsInserted, badRecords } });
+  reply({
+    type: "response",
+    requestId,
+    ok: true,
+    result: { recordsInserted, badRecords, formatDetected, filteredRecords, badStatements },
+  });
 }
 
 function extractQueryId(raw: string): string | null {

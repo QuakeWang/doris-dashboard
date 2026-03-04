@@ -2,13 +2,13 @@
 
 Doris Dashboard is a browser-first analysis UI for Doris audit logs. Parsing/importing/aggregation run locally in the browser via `duckdb-wasm` + Web Worker.
 
-- Offline import: supports `fe.audit.log` (FE native log) and `__internal_schema.audit_log` [OUTFILE CSV](https://doris.apache.org/docs/3.x/data-operate/export/outfile/) exports.
+- Offline import: supports `fe.audit.log` (FE native log), `__internal_schema.audit_log` [OUTFILE CSV](https://doris.apache.org/docs/3.x/data-operate/export/outfile/) exports, and MySQL dump SQL exports.
 - Online import (optional): import `__internal_schema.audit_log` directly from a running Doris cluster (via `agentd`).
 
 ## Features
 
 - Runs locally in your browser; data stays on your machine by default.
-- Offline import via drag-and-drop.
+- Offline import via drag-and-drop (`fe.audit.log`, OUTFILE CSV/TSV, MySQL dump SQL).
 - Online import via `agentd` (export TSV from Doris, then import locally).
 - Visualizations: TopSQL / Share / Template drill-down.
 
@@ -26,8 +26,8 @@ npm ci
 npm run dev
 ```
 
-Open the printed local URL (default: `http://localhost:12305`), then drag-and-drop `fe.audit.log`
-or OUTFILE CSV/TSV in `Import Audit Log`.
+Open the printed local URL (default: `http://localhost:12305`), then drag-and-drop
+`fe.audit.log`, OUTFILE CSV/TSV, or MySQL dump SQL in `Import Audit Log`.
 
 ### 2 Optional: start agentd (online import)
 
